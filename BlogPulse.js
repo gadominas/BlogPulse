@@ -1,0 +1,2070 @@
+// Variables used by Scriptable.
+// These must be at the very top of the file. Do not edit.
+// icon-color: deep-blue; icon-glyph: rss;
+
+/*
+ * BlogPulse — a Feedly-style reader for tech company blogs, for Scriptable on iPhone.
+ * https://github.com/gadominas/BlogPulse
+ *
+ *  - Checks every followed blog each time the app opens and highlights what's new
+ *  - Add blogs by searching (built-in list + Feedly's public feed search) or by pasting any address
+ *  - Mark read, rate 1–3 stars (ratings train Picks), group by day or week, topic pages
+ *  - Optional Claude or OpenAI: summaries, categories, the Story, TL;DRs and invites to read
+ *  - Home-screen widget, in-app updates from GitHub
+ *
+ * Data lives in iCloud Drive › Scriptable › BlogPulse (JSON files). Keys live in the iOS Keychain.
+ */
+
+// This build's version. When releasing, bump it and add a matching entry to releases.json.
+const VERSION = '1.0.0';
+const APP_ID = 'blogpulse';   // unique per app, never changes
+const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
+const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
+const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;   // "Later" = 2 days
+const KC_UPDATE_SNOOZE = 'blogpulse-update-snooze';   // Keychain key, unique per app
+
+// ---------- config ----------
+const APP = "BlogPulse";
+const SCHEME = "blogpulse://";
+const AI = {
+  anthropic: { key: "BLOGPULSE_ANTHROPIC_KEY", model: "claude-haiku-5-5" },
+  openai: { key: "BLOGPULSE_OPENAI_KEY", model: "gpt-4o-mini" },
+};
+const DAY = 864e5;
+const DEFAULT_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1 BlogPulse/1.0";
+
+// Everything tunable lives here; the Settings screen edits these (stored in settings.cfg, defaults below).
+const CONFIG = [
+  ["Checking blogs", [
+    { k: "fetchTimeout", label: "Time limit per blog", help: "How long to wait for one blog before giving up", unit: "s", def: 15, min: 5, max: 60, step: 1 },
+    { k: "concurrency", label: "Blogs checked at once", help: "Higher is faster but heavier on the network", unit: "", def: 6, min: 1, max: 12, step: 1 },
+    { k: "userAgent", label: "Browser identity", help: "The User-Agent sent to blogs; some sites block unknown readers", type: "text", def: DEFAULT_UA },
+  ]],
+  ["Keeping posts", [
+    { k: "maxAgeDays", label: "Keep posts for", help: "Older posts are removed unless you rated them", unit: "days", def: 90, min: 7, max: 365, step: 7 },
+    { k: "maxArticles", label: "Keep at most", help: "Rated posts are kept first, then the newest", unit: "posts", def: 2000, min: 200, max: 10000, step: 100 },
+    { k: "seedFreshDays", label: "New blog backlog", help: "When you follow a blog, posts older than this arrive already read", unit: "days", def: 3, min: 0, max: 30, step: 1 },
+    { k: "pageSize", label: "Posts per page", help: "Shown before the Show more button", unit: "posts", def: 250, min: 50, max: 1000, step: 50 },
+  ]],
+  ["Picks", [
+    { k: "picksMinRatings", label: "Ratings before Picks starts", unit: "ratings", def: 4, min: 1, max: 50, step: 1 },
+    { k: "picksThreshold", label: "Picks strictness", help: "Higher means fewer, closer matches", unit: "", def: 0.8, min: 0.2, max: 3, step: 0.1 },
+  ]],
+  ["Categories", [
+    { k: "kwStrictness", label: "Keyword strictness", help: "Without AI: how strong a keyword match must be to move a post out of its blog's usual topic", unit: "", def: 2.5, min: 1, max: 8, step: 0.5 },
+  ]],
+  ["AI limits", [
+    { k: "aiBatch", label: "New posts summarised per check", unit: "posts", def: 25, min: 5, max: 50, step: 5 },
+    { k: "aiBackfillDays", label: "Also sort unsorted posts from the last", help: "0 turns this off", unit: "days", def: 14, min: 0, max: 60, step: 1 },
+    { k: "excerptChars", label: "Excerpt kept per post", help: "Text the Story and invites can draw on; applies to newly found posts", unit: "chars", def: 600, min: 200, max: 1500, step: 100 },
+    { k: "tldrChars", label: "Article text sent for a TL;DR", unit: "chars", def: 9000, min: 2000, max: 30000, step: 1000 },
+    { k: "storyMaxPosts", label: "Posts per Story", unit: "posts", def: 40, min: 5, max: 80, step: 5 },
+    { k: "storyFallbackDays", label: "“Since last visit” fallback", help: "If little is new, Story uses unread posts from this many days", unit: "days", def: 2, min: 1, max: 14, step: 1 },
+  ]],
+  ["Widget", [
+    { k: "widgetRefreshMin", label: "Ask iOS to refresh every", help: "iOS decides the exact timing", unit: "min", def: 30, min: 15, max: 240, step: 15 },
+    { k: "widgetScanAfterMin", label: "Widget checks blogs if the last check is older than", unit: "min", def: 30, min: 10, max: 720, step: 10 },
+    { k: "widgetScanBudget", label: "Time the widget may spend checking", unit: "s", def: 18, min: 5, max: 25, step: 1 },
+    { k: "widgetStoryHours", label: "Show the AI story summary if newer than", unit: "h", def: 48, min: 1, max: 168, step: 1 },
+  ]],
+  ["Invites", [
+    { k: "invitePresets", label: "Quick instructions", help: "One per line; shown as chips in the invite composer", type: "lines", def: ["Short and casual", "For my team on Slack", "For an executive: lead with business impact", "As a LinkedIn post", "Ask what they think"] },
+  ]],
+];
+const CFG_FLAT = CONFIG.flatMap(([, items]) => items);
+const cfgDef = k => CFG_FLAT.find(x => x.k === k);
+const cfg = k => { const v = settings.cfg && settings.cfg[k]; return v === undefined ? cfgDef(k).def : v; };
+function setCfg(k, v) {
+  const d = cfgDef(k);
+  if (!d) return;
+  settings.cfg = settings.cfg || {};
+  if (v === null) { delete settings.cfg[k]; return; }
+  if (d.type === "text") v = String(v || "").trim() || d.def;
+  else if (d.type === "lines") { v = String(Array.isArray(v) ? v.join("\n") : v || "").split("\n").map(x => x.trim()).filter(Boolean).slice(0, 20); if (!v.length) v = d.def; }
+  else {
+    v = Number(String(v).replace(",", "."));
+    if (!isFinite(v)) v = d.def;
+    v = Math.min(d.max, Math.max(d.min, v));
+    v = d.step < 1 ? Math.round(v / d.step) * d.step : Math.round(v);
+    v = Number(v.toFixed(2));
+  }
+  if (JSON.stringify(v) === JSON.stringify(d.def)) delete settings.cfg[k]; else settings.cfg[k] = v;
+}
+
+const PALETTES = {
+  ink:      { paper: "#f6f7f9", sheet: "#ffffff", ink: "#0f172a", ink2: "#334155", muted: "#5b6475", rule: "#dde2ea", signal: "#1d4ed8", signalWash: "#e5edff", amber: "#b45309", amberWash: "#fdf0dc", danger: "#b91c1c", scheme: "light" },
+  sepia:    { paper: "#f3ead6", sheet: "#fbf5e6", ink: "#2a1f14", ink2: "#4b3b2a", muted: "#73604a", rule: "#e1d3b5", signal: "#8a3b12", signalWash: "#f3dfc8", amber: "#a16207", amberWash: "#f6e5bf", danger: "#9f1239", scheme: "light" },
+  mint:     { paper: "#f1f6f3", sheet: "#ffffff", ink: "#0d2318", ink2: "#2c4a3b", muted: "#556d60", rule: "#d3e2d9", signal: "#15803d", signalWash: "#dcf3e4", amber: "#b45309", amberWash: "#fbeed8", danger: "#b91c1c", scheme: "light" },
+  contrast: { paper: "#ffffff", sheet: "#ffffff", ink: "#000000", ink2: "#111111", muted: "#333333", rule: "#9a9a9a", signal: "#0033cc", signalWash: "#e0e8ff", amber: "#7a4b00", amberWash: "#ffeec2", danger: "#a30000", scheme: "light" },
+  slate:    { paper: "#1c2128", sheet: "#22272e", ink: "#e6edf3", ink2: "#c5ced8", muted: "#9aa5b1", rule: "#373e47", signal: "#6cb6ff", signalWash: "#1d3350", amber: "#e3b341", amberWash: "#3a2f12", danger: "#ff8a7a", scheme: "dark" },
+  night:    { paper: "#05070b", sheet: "#0f141c", ink: "#f3f6fa", ink2: "#d0d7e1", muted: "#9aa4b2", rule: "#1f2733", signal: "#7ab4ff", signalWash: "#132640", amber: "#f5c04a", amberWash: "#2d240c", danger: "#ff8f7a", scheme: "dark" },
+};
+
+// Categories: [id, label, colour, keyword pattern]. AI picks one of these ids; without AI the keywords decide.
+const CATS = [
+  ["tech", "Tech", "#3b82f6", /\b(software|engineer(ing)?|api|apis|kubernetes|k8s|cloud|database|postgres|java|jvm|kotlin|python|javascript|typescript|rust|golang|devops|infrastructure|latency|microservices?|frontend|backend|open[- ]source|github|servers?|deploy(ment)?|compiler|security|vulnerabilit(y|ies)|cve|linux|spring boot|aws|azure|gcp|sdk|developers?|programming|code ?base|observability)\b/gi],
+  ["ai", "AI", "#8b5cf6", /\b(ai|a\.i\.|llms?|gpt-?\d*|genai|generative|machine learning|ml|neural|transformers?|agents?|agentic|inference|fine-?tun(e|ing)|embeddings?|rag|diffusion|chatbots?|claude|gemini|openai|anthropic|deepmind|copilot|prompt(s|ing)?)\b/gi],
+  ["finance", "Finance", "#10b981", /\b(finance|financial|banks?|banking|payments?|stocks?|markets?|invest(ing|ment|ors?)?|funds?|crypto|bitcoin|interest rates?|inflation|earnings|ipo|fintech|trading|portfolios?|etfs?|bonds?|insurance|insurers?|fed|central bank|valuation|dividends?)\b/gi],
+  ["business", "Business", "#f59e0b", /\b(startups?|ceo|cfo|acquisitions?|acquires?|mergers?|layoffs?|hiring|revenue|profits?|customers?|enterprise|retail|marketing|sales|leadership|strategy|growth|funding round|series [abc])\b/gi],
+  ["health", "Health & Medicine", "#ef4444", /\b(health|healthcare|medical|medicine|clinical|patients?|diseases?|drugs?|fda|vaccines?|hospitals?|doctors?|cancer|diabetes|therap(y|ies)|biotech|genom(e|ics)|mental health|nutrition|fitness|surgery|pharma)\b/gi],
+  ["science", "Science", "#06b6d4", /\b(research(ers)?|scientists?|physics|chemistry|biology|space|nasa|esa|astronom(y|ers)|climate|quantum|experiments?|universe|planets?|fusion|telescope|species)\b/gi],
+  ["fashion", "Fashion & Style", "#ec4899", /\b(fashion|runway|couture|clothing|outfits?|luxury|beauty|makeup|skincare|vogue|apparel|sneakers?|wardrobe|menswear|womenswear|stylists?)\b/gi],
+  ["design", "Design", "#f97316", /\b(design(ers)?|ux|ui|typography|figma|branding|illustration|interfaces?|usability|accessibility)\b/gi],
+  ["world", "World & Politics", "#64748b", /\b(elections?|government|polic(y|ies)|president|ministers?|war|eu|regulation|regulators?|laws?|courts?|senate|parliament|sanctions?|geopolitic(s|al)|tariffs?)\b/gi],
+  ["sports", "Sports", "#22c55e", /\b(football|soccer|nba|nfl|tennis|olympics?|league|championship|athletes?|formula 1|f1|marathon|cycling|world cup|transfer window)\b/gi],
+  ["culture", "Culture", "#a855f7", /\b(films?|movies?|music|albums?|books?|novels?|art|museums?|tv series|theat(er|re)|video games?|gaming|celebrit(y|ies)|festival)\b/gi],
+  ["other", "Other", "#94a3b8", null],
+];
+const CAT_IDS = CATS.map(c => c[0]);
+function kwClassify(title, text) {
+  let best = "", bestScore = 0;
+  for (const [id, , , re] of CATS) {
+    if (!re) continue;
+    const t = (String(title).match(re) || []).length, b = (String(text).match(re) || []).length;
+    const score = t * 2 + Math.min(b, 6) * 0.6 * (id === "business" || id === "design" ? 0.7 : 1);
+    if (score > bestScore) { best = id; bestScore = score; }
+  }
+  return { cat: best, score: bestScore };
+}
+
+const CATALOG = [
+  ["Netflix TechBlog", "https://netflixtechblog.com/feed", "streaming infrastructure data java"],
+  ["Cloudflare Blog", "https://blog.cloudflare.com/rss/", "network security edge"],
+  ["GitHub Blog", "https://github.blog/feed/", "devtools copilot ai"],
+  ["Engineering at Meta", "https://engineering.fb.com/feed/", "infrastructure ai"],
+  ["AWS News Blog", "https://aws.amazon.com/blogs/aws/feed/", "cloud"],
+  ["Stripe Blog", "https://stripe.com/blog/feed.rss", "payments fintech api"],
+  ["Spotify Engineering", "https://engineering.atspotify.com/feed/", "backstage platform"],
+  ["Airbnb Engineering", "https://medium.com/feed/airbnb-engineering", "data mobile"],
+  ["Pinterest Engineering", "https://medium.com/feed/pinterest-engineering", "ml data"],
+  ["Dropbox Tech", "https://dropbox.tech/feed", "infrastructure storage"],
+  ["Slack Engineering", "https://slack.engineering/feed/", "backend reliability"],
+  ["Shopify Engineering", "https://shopify.engineering/blog.atom", "commerce ruby scale"],
+  ["Microsoft DevBlogs", "https://devblogs.microsoft.com/feed/", "dotnet azure"],
+  ["Spring Blog", "https://spring.io/blog.atom", "java spring boot"],
+  ["JetBrains Blog", "https://blog.jetbrains.com/feed/", "java kotlin ide"],
+  ["Docker Blog", "https://www.docker.com/blog/feed/", "containers"],
+  ["Kubernetes Blog", "https://kubernetes.io/feed.xml", "cloud native"],
+  ["Hugging Face Blog", "https://huggingface.co/blog/feed.xml", "ai ml llm", "ai"],
+  ["OpenAI News", "https://openai.com/news/rss.xml", "ai llm", "ai"],
+  ["Google DeepMind", "https://deepmind.google/blog/rss.xml", "ai research", "ai"],
+  ["Martin Fowler", "https://martinfowler.com/feed.atom", "architecture refactoring"],
+  ["InfoQ", "https://feed.infoq.com/", "architecture java enterprise"],
+  ["Vercel", "https://vercel.com/atom", "frontend nextjs"],
+];
+
+// ---------- pure helpers (no Scriptable APIs) ----------
+const hash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+const ENT = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", hellip: "…", mdash: "—", ndash: "–", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“", copy: "©" };
+function decode(s) {
+  return String(s).replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e) => {
+    if (e[0] === "#") {
+      const c = e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      try { return String.fromCodePoint(c); } catch (_) { return m; }
+    }
+    return ENT[e.toLowerCase()] ?? m;
+  });
+}
+const cdata = s => String(s).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
+const stripTags = s => s.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ");
+function toText(s, max) {
+  if (!s) return "";
+  let t = decode(stripTags(decode(stripTags(cdata(s))))).replace(/\s+/g, " ").trim();
+  t = t.replace(/The post .{0,240}? appeared first on .{0,160}$/i, "")
+       .replace(/(Continue reading|Read more)\s*(on Medium)?\s*[»›…]*\s*$/i, "").trim();
+  if (max && t.length > max) {
+    t = t.slice(0, max);
+    t = t.slice(0, Math.max(t.lastIndexOf(" "), max - 25)).replace(/[,;:.\s]+$/, "") + "…";
+  }
+  return t;
+}
+function tag(block, names) {
+  for (const n of names) {
+    const m = block.match(new RegExp(`<${n}(?:\\s[^>]*)?>([\\s\\S]*?)</${n}>`, "i"));
+    if (m && m[1].trim()) return m[1];
+  }
+  return "";
+}
+function attr(t, name) {
+  const m = t.match(new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i"));
+  return m ? decode(m[1] ?? m[2] ?? m[3] ?? "") : "";
+}
+const originOf = u => (String(u).match(/^https?:\/\/[^\/?#]+/i) || [""])[0];
+const hostOf = u => originOf(u).replace(/^https?:\/\/(www\.)?/i, "");
+function resolve(base, href) {
+  href = String(href || "").trim();
+  if (/^https?:\/\//i.test(href)) return href;
+  const m = String(base || "").match(/^(https?):\/\/([^\/?#]+)([^?#]*)/i);
+  if (!m || !href) return href;
+  if (href.startsWith("//")) return m[1] + ":" + href;
+  if (href.startsWith("/")) return `${m[1]}://${m[2]}${href}`;
+  return `${m[1]}://${m[2]}${(m[3] || "/").replace(/[^\/]*$/, "")}${href}`;
+}
+const catalogCat = feed => { const c = CATALOG.find(x => x[1] === feed || hostOf(x[1]) === hostOf(feed)); return c ? (c[3] || "tech") : ""; };
+const looksLikeFeed = t => /<(rss|feed|rdf:RDF)[\s>]/i.test(String(t).slice(0, 4000));
+
+function parseFeed(xml, base) {
+  const atom = /<feed[\s>]/i.test(xml.slice(0, 4000)) && !/<rss[\s>]/i.test(xml.slice(0, 4000));
+  const head = xml.split(atom ? /<entry[\s>]/i : /<item[\s>]/i)[0];
+  const title = toText(tag(head, ["title"]), 120);
+  let site = "";
+  if (atom) {
+    for (const l of head.match(/<link\b[^>]*>/gi) || []) {
+      const rel = attr(l, "rel");
+      if (!rel || rel === "alternate") { site = attr(l, "href"); break; }
+    }
+  } else site = toText(tag(head, ["link"]));
+  const items = [];
+  for (const b of xml.match(atom ? /<entry[\s>][\s\S]*?<\/entry>/gi : /<item[\s>][\s\S]*?<\/item>/gi) || []) {
+    let link = "";
+    if (atom) {
+      const ls = b.match(/<link\b[^>]*>/gi) || [];
+      const alt = ls.find(l => !attr(l, "rel") || attr(l, "rel") === "alternate") || ls[0];
+      link = alt ? attr(alt, "href") : "";
+    } else {
+      link = toText(tag(b, ["link"]));
+      if (!link) { const g = toText(tag(b, ["guid"])); if (/^https?:/i.test(g)) link = g; }
+    }
+    if (link) link = resolve(base, link);
+    const t = toText(tag(b, ["title"]), 300);
+    if (!t && !link) continue;
+    const summary = tag(b, ["description", "summary"]);
+    const full = tag(b, ["content:encoded", "content"]);
+    const d = new Date(toText(tag(b, ["pubDate", "published", "updated", "dc:date", "issued"])));
+    let desc = toText(summary || full, 260);
+    if (desc === t) desc = toText(full, 260) === t ? "" : toText(full, 260);
+    items.push({
+      guid: toText(tag(b, ["guid", "id"])) || link || t,
+      title: t || "(untitled)", link, desc,
+      body: toText(full || summary, 1500),
+      pub: isNaN(d) ? 0 : d.getTime(),
+    });
+  }
+  return { title, site: site ? resolve(base, site) : "", items };
+}
+
+async function pool(items, n, fn) {
+  const out = new Array(items.length); let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length) { const k = i++; try { out[k] = await fn(items[k], k); } catch (e) { out[k] = null; } }
+  }));
+  return out;
+}
+
+const STOP = new Set("the and for with from into your you our are was were this that what how why when new using use via about over more than their its have has will can not but all out just how-to part introducing announcing".split(" "));
+const toks = s => [...new Set((String(s).toLowerCase().match(/[a-z0-9][a-z0-9+#.-]{2,}/g) || []).map(w => w.replace(/[.-]+$/, "")).filter(w => w.length > 2 && !STOP.has(w)))];
+
+function computePicks(list, minN = 4, thr = 0.8) {
+  const rated = list.filter(a => a.rating);
+  if (rated.length < minN) return { ready: false, n: rated.length, picks: {} };
+  const bySrc = {}, kw = {};
+  for (const a of rated) {
+    const w = a.rating - 2;                       // ★ = -1, ★★ = 0, ★★★ = +1
+    (bySrc[a.src] = bySrc[a.src] || []).push(w);
+    for (const t of toks(a.title)) kw[t] = (kw[t] || 0) + w;
+  }
+  const srcScore = {};
+  for (const k in bySrc) { const v = bySrc[k]; srcScore[k] = (v.reduce((x, y) => x + y, 0) / v.length) * Math.min(1, v.length / 3); }
+  const picks = {};
+  for (const a of list) {
+    if (a.read || a.rating) continue;
+    const ts = toks(a.title);
+    const k = ts.reduce((s, t) => s + (kw[t] || 0), 0) / Math.sqrt(ts.length || 1);
+    const score = (srcScore[a.src] || 0) + 0.6 * k;
+    if (score >= thr) picks[a.id] = Math.round(score * 10) / 10;
+  }
+  return { ready: true, n: rated.length, picks };
+}
+// ---------- end pure helpers ----------
+
+// ---------- storage ----------
+const fm = (() => { try { return FileManager.iCloud(); } catch (e) { return FileManager.local(); } })();
+const DIR = fm.joinPath(fm.documentsDirectory(), APP);
+if (!fm.fileExists(DIR)) fm.createDirectory(DIR, true);
+const P = n => fm.joinPath(DIR, n + ".json");
+async function load(n, def) {
+  const p = P(n);
+  if (!fm.fileExists(p)) return def;
+  try {
+    if (fm.isFileStoredIniCloud(p) && !fm.isFileDownloaded(p)) await fm.downloadFileFromiCloud(p);
+    return JSON.parse(fm.readString(p));
+  } catch (e) { return def; }
+}
+const write = (n, v) => fm.writeString(P(n), JSON.stringify(v));
+
+let sources = await load("sources", []);
+let articles = await load("articles", {});
+let stories = await load("stories", {});   // AI story per "scope|category"
+for (const k of Object.keys(stories)) if (!k.includes("|")) delete stories[k];
+const settings = Object.assign(
+  { groupBy: "day", view: "unread", readOnOpen: false, ai: true, aiProvider: "anthropic", lastSession: 0, lastScan: 0,
+    checkUpdates: true,   // offer new versions from GitHub (asks again 2 days after "Later")
+    theme: "auto", density: "comfortable", font: "sans", textSize: 1, storyScope: "new" },
+  await load("settings", {})
+);
+const prevSession = settings.lastSession || 0;   // everything first seen after this is "new"
+
+function saveAll(touchSession = true) {
+  if (touchSession) settings.lastSession = Date.now();
+  write("sources", sources); write("articles", articles); write("settings", settings);
+}
+
+// ---------- network ----------
+async function fetchText(url, timeout = cfg("fetchTimeout")) {
+  const r = new Request(url);
+  r.timeoutInterval = timeout;
+  r.headers = { "User-Agent": cfg("userAgent"), "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.9, text/html;q=0.8, */*;q=0.5" };
+  const text = await r.loadString();
+  const code = r.response && r.response.statusCode;
+  if (code && code >= 400) throw new Error(`HTTP ${code}`);
+  return { text: text || "", url: (r.response && r.response.url) || url };
+}
+
+function feedInfo(text, url) {
+  const f = parseFeed(text, url);
+  return f.items.length ? { feed: url, title: f.title || hostOf(url), site: f.site || originOf(url), count: f.items.length, latest: f.items[0].title } : null;
+}
+async function probe(u) {
+  try { const r = await fetchText(u, 10); return looksLikeFeed(r.text) ? feedInfo(r.text, r.url) : null; } catch (e) { return null; }
+}
+
+const COMMON_PATHS = ["/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml", "/index.xml", "/feed/", "/blog/feed", "/blog/rss.xml", "/blog/feed.xml", "/blog/atom.xml", "/engineering/feed"];
+
+async function discoverUrl(input) {
+  const url = /^https?:\/\//i.test(input) ? input : "https://" + input;
+  let page = null;
+  try { page = await fetchText(url, 12); } catch (e) {}
+  if (page && looksLikeFeed(page.text)) { const i = feedInfo(page.text, page.url); return i ? [i] : []; }
+  const cands = new Set();
+  if (page) {
+    for (const l of page.text.match(/<link\b[^>]*>/gi) || []) {
+      const type = attr(l, "type").toLowerCase(), rel = attr(l, "rel").toLowerCase();
+      if (rel.includes("alternate") && /(rss|atom)\+xml/.test(type) && attr(l, "href")) cands.add(resolve(page.url, attr(l, "href")));
+    }
+  }
+  if (!cands.size) {
+    const base = page ? page.url : url, o = originOf(base);
+    const p = base.slice(o.length).split(/[?#]/)[0].replace(/\/$/, "");
+    for (const c of COMMON_PATHS) { if (p) cands.add(o + p + c); cands.add(o + c); }
+  }
+  const found = (await pool([...cands].slice(0, 18), cfg("concurrency"), probe)).filter(Boolean);
+  const seen = new Set();
+  return found.filter(f => !seen.has(f.feed) && seen.add(f.feed));
+}
+
+async function searchFeeds(q) {
+  const ql = q.toLowerCase();
+  const local = CATALOG.filter(c => (c[0] + " " + c[2] + " " + c[1]).toLowerCase().includes(ql))
+    .map(c => ({ feed: c[1], title: c[0], desc: "Popular tech blog · " + c[2] }));
+  let remote = [];
+  try {
+    const r = new Request(`https://cloud.feedly.com/v3/search/feeds?query=${encodeURIComponent(q)}&count=20&locale=en`);
+    r.timeoutInterval = 12;
+    const j = await r.loadJSON();
+    remote = (j.results || []).filter(x => x.feedId && x.feedId.startsWith("feed/")).map(x => ({
+      feed: x.feedId.slice(5), title: x.title || hostOf(x.website || x.feedId.slice(5)),
+      desc: toText(x.description || "", 140), subs: x.subscribers || 0,
+    }));
+  } catch (e) {}
+  const seen = new Set();
+  return [...local, ...remote].filter(r => { const k = r.feed.toLowerCase().replace(/\/$/, ""); return !seen.has(k) && seen.add(k); });
+}
+
+function discover(q) {
+  q = q.trim();
+  const isUrl = /^https?:\/\//i.test(q) || /^[^\s\/]+\.[a-z]{2,}(\/\S*)?$/i.test(q);
+  return isUrl ? discoverUrl(q) : searchFeeds(q);
+}
+
+// ---------- articles ----------
+function classifyKw(a) {
+  const r = kwClassify(a.title, (a.desc || "") + " " + (a.ex || ""));
+  a.kw = r.score >= cfg("kwStrictness") ? r.cat : "";      // strong signal: can override the blog's usual category
+  a.kw0 = r.cat || "";                     // weak signal: only used to learn a blog's usual category
+}
+function sourceDefaults() {
+  const votes = {};
+  for (const a of Object.values(articles)) {
+    if (a.kw === undefined) classifyKw(a);
+    const c = a.kw || a.kw0; if (!c) continue;
+    const v = votes[a.src] = votes[a.src] || {}; v[c] = (v[c] || 0) + 1;
+  }
+  const out = {};
+  for (const s of sources) {
+    if (s.defCat === undefined) s.defCat = catalogCat(s.feed);
+    const v = votes[s.id] || {}, top = Object.keys(v).sort((x, y) => v[y] - v[x])[0];
+    out[s.id] = s.catLock || s.defCat || top || "other";
+  }
+  return out;
+}
+function catOf(a, defs) {
+  const s = sources.find(x => x.id === a.src) || {};
+  return s.catLock || a.aiCat || a.kw || defs[a.src] || "other";
+}
+function ingest(src, items, seeding) {
+  const now = Date.now(), cutoff = now - cfg("maxAgeDays") * DAY, fresh = [];
+  for (const it of items) {
+    const id = hash(src.id + "|" + it.guid);
+    if (articles[id]) continue;
+    const pub = it.pub && it.pub <= now + DAY ? it.pub : now;
+    if (pub < cutoff) continue;
+    const a = { id, src: src.id, title: it.title, link: it.link, desc: it.desc, pub, seen: now };
+    if (seeding && now - pub > cfg("seedFreshDays") * DAY) { a.seeded = 1; a.read = 1; }
+    else if (it.body) a.ex = it.body.slice(0, cfg("excerptChars"));   // excerpt kept for the AI story
+    classifyKw(a);
+    articles[id] = a;
+    if (!a.seeded) fresh.push({ a, body: it.body });
+  }
+  return fresh;
+}
+
+function prune() {
+  const cutoff = Date.now() - cfg("maxAgeDays") * DAY, ids = new Set(sources.map(s => s.id));
+  let list = Object.values(articles).filter(a => ids.has(a.src) && (a.rating || a.pub >= cutoff));
+  if (list.length > cfg("maxArticles")) list = list.sort((x, y) => (y.rating ? 1 : 0) - (x.rating ? 1 : 0) || y.pub - x.pub).slice(0, cfg("maxArticles"));
+  articles = Object.fromEntries(list.map(a => [a.id, a]));
+}
+
+async function addSource(feedUrl, titleHint, depth = 0) {
+  const r = await fetchText(feedUrl, 15);
+  if (!looksLikeFeed(r.text)) {
+    if (depth) throw new Error("No feed found at that address");
+    const d = await discoverUrl(feedUrl);
+    if (!d.length) throw new Error("No RSS or Atom feed found at that address");
+    return addSource(d[0].feed, titleHint, 1);
+  }
+  if (sources.some(s => s.feed === r.url || s.feed === feedUrl)) throw new Error("You already follow this blog");
+  const f = parseFeed(r.text, r.url);
+  if (!f.items.length) throw new Error("The feed has no articles yet");
+  const src = { defCat: catalogCat(feedUrl) || catalogCat(r.url), id: hash(r.url), title: titleHint || (f.title || "").replace(/\s+[-–—|]\s+Medium$/i, "") || hostOf(r.url), feed: r.url, site: f.site || originOf(r.url), added: Date.now(), lastFetched: Date.now() };
+  sources.push(src);
+  const fresh = ingest(src, f.items, true);
+  return { src, count: f.items.length, fresh };
+}
+
+async function scanAll(onProgress) {
+  const active = sources.filter(s => !s.paused);
+  let done = 0; const fresh = [];
+  await pool(active, cfg("concurrency"), async s => {
+    try {
+      const r = await fetchText(s.feed);
+      if (!looksLikeFeed(r.text)) throw new Error("Feed address no longer returns a feed");
+      fresh.push(...ingest(s, parseFeed(r.text, r.url).items, false));
+      s.lastFetched = Date.now(); s.err = null;
+    } catch (e) { s.err = String(e.message || e).slice(0, 120); }
+    onProgress(++done, active.length);
+  });
+  prune();
+  settings.lastScan = Date.now();
+  return fresh;
+}
+
+// ---------- optional AI summaries ----------
+const PROVIDERS = { anthropic: "Claude", openai: "OpenAI" };
+const keyFor = p => Keychain.contains(AI[p].key) ? Keychain.get(AI[p].key) : null;
+const aiKey = () => keyFor(settings.aiProvider);
+const modelFor = p => (settings.model && settings.model[p]) || AI[p].model;
+const maskKey = k => k ? (k.length > 14 ? k.slice(0, 7) + "…" + k.slice(-4) : "…" + k.slice(-4)) : null;
+
+// token usage, kept per provider, model, feature and day
+let usage = await load("usage", { since: Date.now(), p: {} });
+const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function recordUsage(provider, model, feature, tin, tout) {
+  const P = usage.p[provider] = usage.p[provider] || { calls: 0, in: 0, out: 0, models: {}, features: {}, days: {} };
+  const b = (o, k) => o[k] = o[k] || { calls: 0, in: 0, out: 0 };
+  for (const x of [P, b(P.models, model), b(P.features, feature), b(P.days, dayKey())]) { x.calls++; x.in += tin; x.out += tout; }
+  const days = Object.keys(P.days).sort();
+  while (days.length > 400) delete P.days[days.shift()];
+  write("usage", usage);
+}
+
+async function fetchModels(p) {
+  const key = keyFor(p);
+  if (!key) throw new Error(`Add a ${PROVIDERS[p]} key first`);
+  const r = new Request(p === "openai" ? "https://api.openai.com/v1/models" : "https://api.anthropic.com/v1/models?limit=100");
+  r.headers = p === "openai" ? { "Authorization": "Bearer " + key } : { "x-api-key": key, "anthropic-version": "2023-06-01" };
+  r.timeoutInterval = 20;
+  const j = await r.loadJSON();
+  if (j.error) throw new Error(j.error.message || "Couldn't load models");
+  let list = (j.data || []).map(m => ({ id: m.id, name: m.display_name || m.id, t: m.created_at ? Date.parse(m.created_at) : (m.created || 0) * 1000 }));
+  if (p === "openai") list = list.filter(m => /^(gpt-|o\d|chatgpt-)/.test(m.id) && !/(audio|realtime|tts|transcribe|image|search|embedding|instruct|moderation)/.test(m.id));
+  list.sort((a, b) => b.t - a.t);
+  settings.models = settings.models || {};
+  settings.models[p] = { at: Date.now(), list: list.map(m => ({ id: m.id, name: m.name })) };
+  return list.length;
+}
+
+async function askKey(p) {
+  const cur = keyFor(p);
+  const al = new Alert();
+  al.title = `${PROVIDERS[p]} API key`;
+  al.message = cur ? `The saved key ends in …${cur.slice(-4)}. Paste a new key to replace it.` : "Paste your API key. It's stored in the iOS Keychain on this device only.";
+  al.addSecureTextField(p === "openai" ? "sk-…" : "sk-ant-…", "");
+  al.addAction("Save key");
+  al.addCancelAction("Cancel");
+  if (await al.present() !== 0) return false;
+  const v = al.textFieldValue(0).trim();
+  if (!v) return false;
+  Keychain.set(AI[p].key, v);
+  if (!aiKey()) settings.aiProvider = p;
+  return true;
+}
+
+async function aiCall(system, user, maxTokens = 2500, feature = "other", provider = settings.aiProvider) {
+  const key = keyFor(provider);
+  if (!key) throw new Error(`No ${PROVIDERS[provider]} key saved`);
+  const openai = provider === "openai", model = modelFor(provider);
+  const r = new Request(openai ? "https://api.openai.com/v1/chat/completions" : "https://api.anthropic.com/v1/messages");
+  r.method = "POST";
+  r.timeoutInterval = 90;
+  if (openai) {
+    r.headers = { "Authorization": "Bearer " + key, "Content-Type": "application/json" };
+    r.body = JSON.stringify({ model, messages: [{ role: "system", content: system }, { role: "user", content: user }] });
+  } else {
+    r.headers = { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" };
+    r.body = JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] });
+  }
+  const j = await r.loadJSON();
+  if (j.error) throw new Error(j.error.message || "AI request failed");
+  const u = j.usage || {};
+  recordUsage(provider, model, feature,
+    openai ? (u.prompt_tokens || 0) : (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0),
+    openai ? (u.completion_tokens || 0) : (u.output_tokens || 0));
+  return openai ? ((j.choices && j.choices[0] && j.choices[0].message.content) || "") : (j.content || []).map(c => c.text || "").join("");
+}
+function parseJSON(txt) {
+  const s = String(txt).replace(/```json|```/g, "").trim();
+  const a = s.search(/[\[{]/), b = Math.max(s.lastIndexOf("}"), s.lastIndexOf("]"));
+  return JSON.parse(s.slice(a, b + 1));
+}
+
+async function aiSummaries(fresh) {
+  if (!aiKey() || !settings.ai) return 0;
+  const ids = new Set(fresh.map(x => x.a.id));
+  const back = Object.values(articles).filter(a => !a.seeded && !a.aiCat && !ids.has(a.id) && a.pub > Date.now() - cfg("aiBackfillDays") * DAY)
+    .sort((a, b) => b.pub - a.pub).slice(0, cfg("aiBackfillDays") ? Math.max(0, cfg("aiBatch") + 5 - Math.min(fresh.length, cfg("aiBatch"))) : 0).map(a => ({ a, body: a.ex || a.desc }));
+  const batch = fresh.slice(0, cfg("aiBatch")).concat(back);
+  if (!batch.length) return 0;
+  const system = `You summarise and categorise blog posts for a senior software architect. For each numbered article: write one neutral sentence (max 30 words) saying what it covers and why it matters, and choose its category by the article's subject (not by who published it), exactly one of: ${CAT_IDS.join(", ")}. Reply with ONLY a JSON array like [{"i":0,"s":"...","c":"tech"}], no prose, no code fences.`;
+  const user = batch.map((x, i) => `[${i}] ${x.a.title}\n${x.body || x.a.desc}`).join("\n\n");
+  const arr = parseJSON(await aiCall(system, user, 2500, "summaries"));
+  let n = 0;
+  for (const o of Array.isArray(arr) ? arr : []) {
+    const x = batch[o.i]; if (!x) continue;
+    if (o.s && !x.a.ai) x.a.ai = String(o.s).slice(0, 300);
+    if (CAT_IDS.includes(o.c)) x.a.aiCat = o.c;
+    n++;
+  }
+  return n;
+}
+
+// ---------- AI story: the latest posts blended into one read ----------
+function storyPool(scope, cat) {
+  const now = Date.now(), defs = sourceDefaults();
+  const list = Object.values(articles).filter(a => !a.seeded && (cat === "all" || catOf(a, defs) === cat)).sort((a, b) => b.pub - a.pub);
+  let pick;
+  if (scope === "today") pick = list.filter(a => a.pub >= now - DAY);
+  else if (scope === "week") pick = list.filter(a => a.pub >= now - 7 * DAY);
+  else {
+    pick = list.filter(a => a.seen > prevSession);
+    if (pick.length < 3) pick = list.filter(a => !a.read && a.pub >= now - cfg("storyFallbackDays") * DAY);
+  }
+  if (pick.length < 3) pick = list.slice(0, 12);
+  return pick.slice(0, cfg("storyMaxPosts"));
+}
+const storySig = (scope, cat) => hash(storyPool(scope, cat).map(a => a.id).join(","));
+const storyKey = () => settings.storyScope + "|" + (settings.category || "all");
+
+async function makeStory(scope, cat) {
+  const pool = storyPool(scope, cat);
+  if (!pool.length) throw new Error(cat === "all" ? "No posts to write about yet" : "No posts in this category yet");
+  const srcName = id => (sources.find(s => s.id === id) || {}).title || "";
+  const liked = Object.values(articles).filter(a => a.rating === 3).sort((a, b) => b.pub - a.pub).slice(0, 12).map(a => "- " + a.title);
+  const system = `You edit a personal tech briefing for a senior software architect. Blend the numbered posts into ONE readable story: group related posts into themes, explain what happened and why it matters, and connect posts from different companies only where they genuinely relate. Plain, direct language; no hype, no filler. Cite posts as [n] right after the sentence that uses them; every post you mention must be cited. Use only facts in the excerpts.
+Reply with ONLY JSON, no code fences:
+{"headline":"...","dek":"one-sentence overview","tldr":["3 bullet points, each one sentence with [n] citations"],"sections":[{"title":"...","body":"2-4 short paragraphs separated by a blank line"}],"mustRead":[{"n":0,"why":"one sentence"}]}
+Use 3-6 sections and at most 3 mustRead posts.`;
+  const user = (liked.length ? `Posts the reader rated highest — favour similar themes:\n${liked.join("\n")}\n\n` : "") +
+    "Posts:\n\n" + pool.map((a, i) => `[${i}] ${a.title} — ${srcName(a.src)}, ${new Date(a.pub).toDateString()}\n${a.ex || a.ai || a.desc || ""}`).join("\n\n");
+  const j = parseJSON(await aiCall(system, user, 4000, "story"));
+  const ids = pool.map(a => a.id);
+  stories[scope + "|" + cat] = {
+    scope, cat, sig: storySig(scope, cat), at: Date.now(), ids,
+    headline: String(j.headline || "Your tech briefing"), dek: String(j.dek || ""), provider: settings.aiProvider,
+    tldr: (Array.isArray(j.tldr) ? j.tldr : []).map(String).slice(0, 5),
+    sections: (j.sections || []).map(x => ({ title: String(x.title || ""), body: String(x.body || "") })).filter(x => x.body),
+    mustRead: (j.mustRead || []).filter(x => ids[x.n]).map(x => ({ id: ids[x.n], why: String(x.why || "") })),
+  };
+  write("stories", stories);
+}
+
+// ---------- TL;DR for a single post: AI when a key is saved, otherwise extracted from the page ----------
+function extractArticle(html) {
+  const meta = name => { const m = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]*>`, "i")); return m ? toText(attr(m[0], "content")) : ""; };
+  const desc = meta("og:description") || meta("description");
+  let h = html.replace(/<(script|style|noscript|svg|nav|header|footer|aside|form|iframe|figure|button)\b[\s\S]*?<\/\1>/gi, " ");
+  const main = h.match(/<article[\s>][\s\S]*<\/article>/i) || h.match(/<main[\s>][\s\S]*<\/main>/i);
+  if (main) h = main[0];
+  const blocks = (h.match(/<(p|h2|h3)\b[^>]*>[\s\S]*?<\/\1>/gi) || []).map(x => ({ tag: x.slice(1, 3).replace(/\W/g, "").toLowerCase(), text: toText(x) }));
+  const paras = blocks.filter(b => b.tag === "p" && b.text.length >= 60).map(b => b.text);
+  const heads = blocks.filter(b => b.tag !== "p" && b.text.length > 2 && b.text.length < 90).map(b => b.text);
+  const text = paras.join("\n\n");
+  return { desc, paras, heads, text, words: text ? text.split(/\s+/).length : 0 };
+}
+
+function extractiveTldr(a, art) {
+  if (!art || !art.paras.length) return { lead: a.desc || a.title, points: [], sections: [] };
+  const sents = [];
+  art.paras.slice(0, 40).forEach((p, pi) => (p.match(/[^.!?]+[.!?]+["”’)]?(\s|$)/g) || [p]).forEach(x => {
+    x = x.trim(); if (x.length >= 50 && x.length <= 300) sents.push({ s: x, pi });
+  }));
+  const freq = {};
+  sents.forEach(x => toks(x.s).forEach(t => freq[t] = (freq[t] || 0) + 1));
+  const inTitle = new Set(toks(a.title));
+  sents.forEach((x, i) => {
+    const ts = toks(x.s); x.i = i;
+    x.score = ts.reduce((n, t) => n + Math.min(freq[t], 6) + (inTitle.has(t) ? 3 : 0), 0) / Math.sqrt(ts.length || 1) + (x.pi < 2 ? 2 : 0);
+  });
+  const lead = art.desc && art.desc.length > 40 ? art.desc : (sents[0] ? sents[0].s : a.desc || a.title);
+  const points = sents.filter(x => x.s !== lead && !lead.includes(x.s.slice(0, 40)))
+    .sort((x, y) => y.score - x.score).slice(0, 4).sort((x, y) => x.i - y.i).map(x => x.s);
+  return { lead, points, sections: art.heads.slice(0, 6) };
+}
+
+async function makeTldr(a) {
+  let art = null;
+  try { const r = await fetchText(a.link, 15); art = extractArticle(r.text); } catch (e) {}
+  const usable = art && art.words > 80;
+  const text = usable ? art.text : (a.ex || a.ai || a.desc || "");
+  const mins = Math.max(1, Math.round((usable ? art.words : text.split(/\s+/).length) / 230));
+  let note = "";
+  if (aiKey()) {
+    try {
+      const system = 'You write TL;DRs of engineering blog posts for a senior software architect. Use only facts in the text. Reply with ONLY JSON, no code fences: {"tldr":"one sentence","points":["3-5 short bullets with concrete facts"],"why":"one sentence on why it matters to an architect"}';
+      const j = parseJSON(await aiCall(system, `Title: ${a.title}\n\n${text.slice(0, cfg("tldrChars"))}`, 900, "tldr"));
+      return { kind: "ai", provider: settings.aiProvider, at: Date.now(), lead: String(j.tldr || ""), points: (j.points || []).map(String).slice(0, 6), why: String(j.why || ""), mins, partial: !usable };
+    } catch (e) { note = "AI summary failed (" + String(e.message || e).slice(0, 60) + "), so this was extracted instead."; }
+  }
+  if (!usable && !text) throw new Error("This article couldn't be loaded");
+  return Object.assign({ kind: "extract", at: Date.now(), mins, partial: !usable, note }, extractiveTldr(a, usable ? art : null));
+}
+
+// ---------- invite someone to read a post ----------
+async function makeInvite(a, who, instr) {
+  const src = (sources.find(s => s.id === a.src) || {}).title || hostOf(a.link);
+  const t = a.tldr || {};
+  if (!aiKey()) {
+    const lead = t.lead || a.ai || a.desc || "";
+    return { kind: "template", text: `${who ? "Hi " + who + ", t" : "T"}hought you'd find this worth a read: “${a.title}” from ${src}.${lead ? " " + lead : ""}\n\n${a.link}` };
+  }
+  const system = `You write short personal messages that invite someone to read an article. Write in the first person as the sender. Make the reader want to open it: lead with the most interesting point and say briefly why it matters to them. Be specific, not salesy. No hashtags, emojis or subject line unless the instructions ask for them. Do not include the link; it is added after your message. The sender's instructions on tone, language, length, format and audience override these defaults. Reply with only the message text.`;
+  const user = `Sender's instructions: ${instr || "(none) — 2–3 friendly, specific sentences."}
+Recipient: ${who || "not specified"}
+
+Article: ${a.title}
+Published by: ${src}
+${t.lead ? "TL;DR: " + t.lead + "\n" : ""}${t.points && t.points.length ? "Key points:\n" + t.points.map(x => "- " + x).join("\n") + "\n" : ""}${t.why ? "Why it matters: " + t.why + "\n" : ""}Excerpt: ${(a.ex || a.ai || a.desc || "").slice(0, 1500)}`;
+  const msg = (await aiCall(system, user, 700, "invite")).trim().replace(/^["“]+|["”]+$/g, "").trim();
+  if (!msg) throw new Error("the AI returned an empty message");
+  return { kind: "ai", provider: settings.aiProvider, text: msg + "\n\n" + a.link };
+}
+
+// ---------- in-app updates (pattern from StravaFeed) ----------
+// Compares "1.10.0" and "1.9.2" as numbers: returns 1, 0 or -1.
+function cmpVer(a, b) {
+  const pa = String(a).split('.').map(n => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+function updateSnoozed() {
+  try { return Keychain.contains(KC_UPDATE_SNOOZE) && Date.now() < +Keychain.get(KC_UPDATE_SNOOZE); } catch (e) { return false; }
+}
+function snoozeUpdate() { Keychain.set(KC_UPDATE_SNOOZE, String(Date.now() + UPDATE_SNOOZE_MS)); }
+function clearUpdateSnooze() { if (Keychain.contains(KC_UPDATE_SNOOZE)) Keychain.remove(KC_UPDATE_SNOOZE); }
+
+async function checkForUpdate(force = false) {
+  if (!force && (settings.checkUpdates === false || updateSnoozed())) return null;
+  try {
+    const req = new Request(`${REPO_RAW}releases.json?t=${Date.now()}`);
+    req.timeoutInterval = 10;
+    const data = await req.loadJSON();
+    if (!data || !Array.isArray(data.releases)) return null;
+    const newer = data.releases
+      .filter(r => r && r.version && cmpVer(r.version, VERSION) > 0)
+      .sort((x, y) => cmpVer(y.version, x.version));
+    if (!newer.length) return null;
+    // The newest release's highlights first, topped up from older versions the user skipped.
+    const highlights = [];
+    newer.forEach(r => (r.highlights || []).forEach(h => {
+      if (highlights.length < 3 && h && h.title) highlights.push(h);
+    }));
+    return {
+      current: VERSION, latest: newer[0].version, title: newer[0].title || '', date: newer[0].date || '',
+      skipped: newer.length, highlights, script: data.script || SCRIPT_FILE,
+    };
+  } catch (e) {
+    console.log('Update check skipped: ' + e);
+    return null;
+  }
+}
+
+async function applyUpdate(info) {
+  const req = new Request(`${REPO_RAW}${encodeURI((info && info.script) || SCRIPT_FILE)}?t=${Date.now()}`);
+  req.timeoutInterval = 30;
+  const code = await req.loadString();
+  const okStatus = req.response && req.response.statusCode === 200;
+  const m = code && code.match(/const VERSION = '([^']+)'/);
+  // 1. A real script for THIS app, not an error page or another project's file
+  if (!okStatus || !m || !code.includes(`const APP_ID = '${APP_ID}'`)) {
+    throw new Error("The download didn't look right. Try again later.");
+  }
+  // 2. Actually newer: GitHub's cache can serve the old file for a few minutes after a release
+  if (cmpVer(m[1], VERSION) <= 0) {
+    throw new Error('GitHub is still serving the old version. Try again in a few minutes.');
+  }
+  // 3. Write it where the running script lives (iCloud or on the phone)
+  const path = module.filename;
+  let lfm = FileManager.local();
+  try {
+    const ic = FileManager.iCloud();
+    if (path.startsWith(ic.documentsDirectory())) lfm = ic;
+  } catch (e) {}
+  lfm.writeString(path, code);
+  return m[1];   // the version now installed
+}
+
+let pendingUpdate = null, updateChecked = false;
+const offerUpdate = () => { if (pendingUpdate) call("__showUpdate", pendingUpdate); };
+
+// ---------- state sent to the UI ----------
+function clientState() {
+  const list = Object.values(articles).sort((a, b) => b.pub - a.pub);
+  const defs = sourceDefaults();
+  const pk = computePicks(list, cfg("picksMinRatings"), cfg("picksThreshold"));
+  return {
+    articles: list.map(a => ({
+      id: a.id, src: a.src, title: a.title, link: a.link, desc: a.ai || a.desc || "", ai: !!a.ai, pub: a.pub,
+      read: !!a.read, rating: a.rating || 0, cat: catOf(a, defs), catBy: a.aiCat ? "ai" : "kw", isNew: !a.seeded && a.seen > prevSession, pick: pk.picks[a.id] || 0,
+    })),
+    sources: sources.map(s => ({ id: s.id, title: s.title, feed: s.feed, site: s.site, err: s.err || null, paused: !!s.paused, lastFetched: s.lastFetched || 0, cat: defs[s.id], catLock: s.catLock || "" })),
+    ai: {
+      provider: settings.aiProvider,
+      keys: Object.fromEntries(Object.keys(PROVIDERS).map(p => [p, maskKey(keyFor(p))])),
+      model: Object.fromEntries(Object.keys(PROVIDERS).map(p => [p, modelFor(p)])),
+      models: settings.models || {}, usage, today: dayKey(),
+    },
+    cfg: Object.fromEntries(CFG_FLAT.map(d => [d.k, cfg(d.k)])),
+    cfgSchema: CONFIG.map(([title, items]) => ({ title, items })),
+    categories: CATS.map(c => ({ id: c[0], label: c[1], color: c[2] })),
+    settings: {
+      groupBy: settings.groupBy, view: settings.view, readOnOpen: settings.readOnOpen, ai: settings.ai, aiProvider: settings.aiProvider, hasKey: !!aiKey(), checkUpdates: settings.checkUpdates !== false,
+      theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize, storyScope: settings.storyScope, category: settings.category || "all", inviteInstr: settings.inviteInstr || "",
+    },
+    story: (() => { const st = stories[storyKey()]; return st ? Object.assign({}, st, { stale: st.sig !== storySig(st.scope, st.cat) }) : null; })(),
+    picksReady: pk.ready, rated: pk.n, lastScan: settings.lastScan, palettes: PALETTES, version: VERSION,
+    catalog: CATALOG.map(c => ({ title: c[0], feed: c[1], tags: c[2] })),
+  };
+}
+
+const safeJSON = x => JSON.stringify(x === undefined ? null : x).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\//g, "<\\/");
+
+// ---------- UI ----------
+const wv = new WebView();
+const call = (fn, ...args) => wv.evaluateJavaScript(`window.${fn} && window.${fn}(${args.map(safeJSON).join(",")})`, false).catch(() => {});
+const toast = msg => call("toast", msg);
+const push = () => call("recv", clientState());
+
+let storyBusy = false;
+async function storyAction(m) {
+  if (!aiKey()) return toast("Add a Claude or OpenAI key to use Story");
+  if (m.scope) settings.storyScope = m.scope;
+  if (m.cat && (m.cat === "all" || CAT_IDS.includes(m.cat))) settings.category = m.cat;
+  const scope = settings.storyScope, cat = settings.category || "all";
+  if ((stories[storyKey()] && !m.force) || storyBusy) { saveAll(); push(); return call("onStory", storyBusy); }
+  storyBusy = true; call("onStory", true);
+  try { await makeStory(scope, cat); }
+  catch (e) { toast("Story not written: " + String(e.message || e).slice(0, 90)); }
+  storyBusy = false; saveAll(); push(); call("onStory", false);
+}
+
+let scanning = false;
+async function runScan() {
+  if (scanning) return;
+  scanning = true;
+  call("onProgress", 0, sources.filter(s => !s.paused).length);
+  const fresh = await scanAll((d, t) => call("onProgress", d, t));
+  call("onProgress", 0, 0);
+  saveAll(); push();
+  const failed = sources.filter(s => s.err && !s.paused).length;
+  toast((fresh.length ? `${fresh.length} new article${fresh.length > 1 ? "s" : ""}` : "No new articles") + (failed ? ` · ${failed} source${failed > 1 ? "s" : ""} failed` : ""));
+  if (settings.ai && aiKey()) {
+    try { if (await aiSummaries(fresh)) { saveAll(); push(); } }
+    catch (e) { toast("Summaries skipped: " + String(e.message || e).slice(0, 80)); }
+  }
+  scanning = false;
+}
+
+async function handle(m) {
+  const a = m.id && articles[m.id];
+  switch (m.type) {
+    case "read": if (a) a.read = m.v ? 1 : 0; break;
+    case "rate": if (a) { a.rating = m.v || 0; if (a.rating) a.read = 1; }
+      { const pk = computePicks(Object.values(articles), cfg("picksMinRatings"), cfg("picksThreshold")); call("onPicks", pk); } break;
+    case "markAll": for (const id of m.ids || []) if (articles[id]) articles[id].read = 1; break;
+    case "open": if (a && a.link) { if (settings.readOnOpen) a.read = 1; saveAll(); await Safari.openInApp(a.link, false); } return;
+    case "set": if (["groupBy", "view", "readOnOpen", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates"].includes(m.k)) settings[m.k] = m.v; break;
+    case "refresh": return runScan();
+    case "discover": {
+      let res = [];
+      try { res = await discover(m.q); } catch (e) {}
+      return call("onDiscover", res.map(r => ({ ...r, following: sources.some(s => s.feed === r.feed) })));
+    }
+    case "add":
+      try {
+        const { src, count, fresh } = await addSource(m.feed, m.title);
+        saveAll(); push(); call("addDone", m.feed, true);
+        toast(`Following ${src.title} · ${count} recent posts`);
+        if (fresh.length && settings.ai && aiKey()) aiSummaries(fresh).then(n => { if (n) { saveAll(); push(); } }).catch(() => {});
+      } catch (e) { call("addDone", m.feed, false); toast(String(e.message || e)); }
+      return;
+    case "remove":
+      sources = sources.filter(s => s.id !== m.id);
+      for (const id in articles) if (articles[id].src === m.id) delete articles[id];
+      saveAll(); return push();
+    case "srccat": { const s = sources.find(x => x.id === m.id); if (s) s.catLock = CAT_IDS.includes(m.v) ? m.v : ""; saveAll(); return push(); }
+    case "pause": { const s = sources.find(x => x.id === m.id); if (s) s.paused = !s.paused; saveAll(); return push(); }
+    case "story": return storyAction(m);
+    case "invite": {
+      if (!a) return;
+      const instr = String(m.instr || "").trim().slice(0, 1000);
+      if (instr) settings.inviteInstr = instr;
+      let res;
+      try { res = await makeInvite(a, String(m.who || "").trim().slice(0, 120), instr); }
+      catch (e) { res = { error: String(e.message || e) }; }
+      saveAll(); return call("onInvite", a.id, res);
+    }
+    case "share": if (m.text) await ShareSheet.present([m.text]); return;
+    case "copy": if (m.text) { Pasteboard.copy(m.text); toast("Invite copied"); } return;
+    case "tldr": {
+      if (!a) return;
+      const wantAI = m.force && aiKey();
+      if (a.tldr && !m.force) return call("onTldr", a.id, a.tldr);
+      if (a.tldr && m.force && !wantAI && a.tldr.kind === "extract") return call("onTldr", a.id, a.tldr);
+      try { a.tldr = await makeTldr(a); }
+      catch (e) { return call("onTldr", a.id, { error: String(e.message || e) }); }
+      saveAll(); return call("onTldr", a.id, a.tldr);
+    }
+    case "update-later": snoozeUpdate(); pendingUpdate = null; return;
+    case "update-now": {
+      let ok = false, msg = "";
+      try { msg = await applyUpdate(pendingUpdate); ok = true; pendingUpdate = null; clearUpdateSnooze(); }
+      catch (e) { msg = String(e.message || e); }
+      return call("__done", m.req, ok, msg);
+    }
+    case "update-check": {
+      const u = await checkForUpdate(true);
+      await call("__done", m.req, true, u ? `Version ${u.latest} is available` : `You're on the latest version (${VERSION})`);
+      if (u) { pendingUpdate = u; offerUpdate(); }
+      return;
+    }
+    case "aikey": {
+      const p = PROVIDERS[m.v] ? m.v : settings.aiProvider;
+      if (await askKey(p)) {
+        settings.ai = true; saveAll(); push();
+        try { const n = await fetchModels(p); toast(`${PROVIDERS[p]} key saved — ${n} models available`); }
+        catch (e) { toast(`Key saved, but checking it failed: ${String(e.message || e).slice(0, 70)}`); }
+      }
+      saveAll(); return push();
+    }
+    case "airm": { const p = m.v; if (PROVIDERS[p] && Keychain.contains(AI[p].key)) Keychain.remove(AI[p].key); toast(`${PROVIDERS[p]} key removed`); saveAll(); return push(); }
+    case "aiprov": if (PROVIDERS[m.v]) settings.aiProvider = m.v; saveAll(); return push();
+    case "aimodels":
+      try { const n = await fetchModels(m.v); toast(`${n} ${PROVIDERS[m.v]} models found`); }
+      catch (e) { toast(String(e.message || e).slice(0, 90)); }
+      saveAll(); return push();
+    case "aimodel": if (PROVIDERS[m.p] && m.v) { settings.model = settings.model || {}; settings.model[m.p] = m.v; toast(`${PROVIDERS[m.p]} now uses ${m.v}`); } saveAll(); return push();
+    case "aitest": {
+      const p = m.v, t0 = Date.now();
+      try { await aiCall("Reply with the single word OK.", "Connection test.", 10, "test", p); toast(`${PROVIDERS[p]} works — ${modelFor(p)} answered in ${((Date.now() - t0) / 1000).toFixed(1)} s`); }
+      catch (e) { toast(`${PROVIDERS[p]} test failed: ${String(e.message || e).slice(0, 80)}`); }
+      return push();
+    }
+    case "cfg": {
+      const before = cfg("kwStrictness");
+      if (m.k === "*") settings.cfg = {}; else setCfg(m.k, m.v);
+      if (cfg("kwStrictness") !== before) Object.values(articles).forEach(classifyKw);
+      if (m.k === "*" || m.k === "maxAgeDays" || m.k === "maxArticles") prune();
+      saveAll(); return push();
+    }
+    case "usagereset": usage = { since: Date.now(), p: {} }; write("usage", usage); toast("Usage counters reset"); return push();
+  }
+  saveAll();
+}
+
+wv.shouldAllowRequest = req => {
+  const u = req.url || "";
+  if (u.startsWith(SCHEME)) {
+    let m = {};
+    try { m = JSON.parse(decodeURIComponent(u.split("?d=")[1] || "%7B%7D")); } catch (e) {}
+    handle(m).catch(e => toast(String(e.message || e)));
+    return false;
+  }
+  if (/^https?:/i.test(u)) { Safari.openInApp(u, false); return false; }
+  return true;
+};
+
+function clientApp() {
+  let S = window.__INIT;
+  const look = { theme: S.settings.theme || "auto", density: S.settings.density || "comfortable", font: S.settings.font || "sans", textSize: +S.settings.textSize || 1 };
+  let view = S.settings.view || "unread", group = S.settings.groupBy || "day", storyScope = S.settings.storyScope || "new";
+  if (view === "story" && !S.settings.hasKey) view = "unread";
+  let tldrId = null; const tl = {}, expanded = new Set();
+  let cfgOpen = false, cfgArmed = false;
+  const cfgItem = k => { for (const sec of S.cfgSchema) for (const d of sec.items) if (d.k === k) return d; return null; };
+  const cfgChanged = k => { const d = cfgItem(k); return d && JSON.stringify(S.cfg[k]) !== JSON.stringify(d.def); };
+  const fmtCfg = (d, v) => d.step && d.step < 1 ? Number(v).toFixed(String(d.step).split(".")[1].length) : String(v);
+  function renderCfg() {
+    const el = $("#cfgsheet"), keepTop = el.scrollTop;
+    el.classList.toggle("open", cfgOpen); lockBody();
+    if (!cfgOpen) return;
+    const field = d => {
+      const v = S.cfg[d.k], ch = cfgChanged(d.k);
+      const reset = ch ? `<button class="link small" data-act="cfgreset" data-k="${d.k}">Reset</button>` : "";
+      const head = `<div class="cfg-h"><b>${esc(d.label)}</b>${reset}</div>${d.help ? `<small class="muted">${esc(d.help)}</small>` : ""}`;
+      if (d.type === "text") return `<div class="cfg ${ch ? "ch" : ""}">${head}<input class="cfgin wide" data-k="${d.k}" value="${esc(v)}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`;
+      if (d.type === "lines") return `<div class="cfg ${ch ? "ch" : ""}">${head}<textarea class="cfgin wide" data-k="${d.k}" rows="${Math.max(4, v.length + 1)}">${esc(v.join("\n"))}</textarea></div>`;
+      return `<div class="cfg ${ch ? "ch" : ""}">${head}
+        <div class="stepper"><button data-act="cfgstep" data-k="${d.k}" data-v="-1" aria-label="Decrease" ${v <= d.min ? "disabled" : ""}>−</button>
+        <input class="cfgin" data-k="${d.k}" value="${fmtCfg(d, v)}" inputmode="decimal" aria-label="${esc(d.label)}">
+        <button data-act="cfgstep" data-k="${d.k}" data-v="1" aria-label="Increase" ${v >= d.max ? "disabled" : ""}>+</button>
+        <span class="unit">${esc(d.unit || "")}</span><span class="range">${fmtCfg(d, d.min)}–${fmtCfg(d, d.max)}${ch ? ` — original ${fmtCfg(d, d.def)}` : ""}</span></div></div>`;
+    };
+    const changed = Object.keys(S.cfg).filter(cfgChanged).length;
+    el.innerHTML = `<div class="sh-head"><h2>Settings</h2><button class="link" data-act="cfgclose">Done</button></div><div class="sh-body">
+      <p class="hint">Changes apply right away and are kept on this iPhone.</p>
+      <h3 class="sec">Appearance</h3>${lookHTML()}
+      <h3 class="sec">Reading</h3>
+      <div class="srow"><div class="grow"><b>Mark as read when opened</b><small class="muted">Off: you mark posts read yourself</small></div><button class="switch ${S.settings.readOnOpen ? "on" : ""}" data-act="toggle" data-v="readOnOpen" aria-label="Mark as read when opened"></button></div>
+      <div class="srow"><div class="grow"><b>Picks</b><small class="muted">${S.picksReady ? `Learning from ${S.rated} ratings` : `Rate ${Math.max(0, S.cfg.picksMinRatings - S.rated)} more post${S.cfg.picksMinRatings - S.rated === 1 ? "" : "s"} to switch on`}</small></div></div>
+      <h3 class="sec">Updates</h3>
+      <div class="srow"><div class="grow"><b>Offer new versions</b><small class="muted">You have BlogPulse ${esc(S.version)}. “Later” waits two days.</small></div><button class="switch ${S.settings.checkUpdates ? "on" : ""}" data-act="toggle" data-v="checkUpdates" aria-label="Offer new versions"></button></div>
+      <div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>
+      <h3 class="sec">AI</h3>
+      <div class="srow"><div class="grow"><b>Keys, models and token usage</b><small class="muted">${S.settings.hasKey ? `${PN[S.ai.provider]} — ${esc(S.ai.model[S.ai.provider])}${S.ai.usage.p[S.ai.provider] ? " — " + fmtN(S.ai.usage.p[S.ai.provider].in + S.ai.usage.p[S.ai.provider].out) + " tokens used" : ""}` : "Add a Claude or OpenAI key for summaries, Story and TL;DR"}</small></div>
+        <button class="sm ${S.settings.hasKey ? "" : "primary"}" data-act="aiopen">AI settings</button></div>
+      ${S.cfgSchema.map(sec => `<h3 class="sec">${esc(sec.title)}</h3>${sec.items.map(field).join("")}`).join("")}
+      <div class="aic-btns cfg-foot"><span class="note">${changed ? changed + " setting" + (changed === 1 ? "" : "s") + " changed" : "All settings are at their original values"}</span>
+        ${changed ? `<button class="sm danger ${cfgArmed ? "armed" : ""}" data-act="cfgall">${cfgArmed ? "Confirm reset" : "Reset all"}</button>` : ""}</div>
+    </div>`;
+    el.scrollTop = keepTop;
+  }
+  let aiOpen = false, aiArmed = null; const aiLoading = new Set();
+  const PN = { anthropic: "Claude", openai: "OpenAI" };
+  const FEAT = { summaries: "Summaries and categories", story: "Story", tldr: "TL;DR", invite: "Invites", test: "Connection tests", other: "Other" };
+  const fmtN = n => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e4 ? Math.round(n / 1e3) + "k" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
+  function arm(key) { aiArmed = key; renderAI(); setTimeout(() => { if (aiArmed === key) { aiArmed = null; renderAI(); } }, 3500); }
+  function usageBlock(p, P) {
+    const days = [], now = new Date();
+    for (let i = 13; i >= 0; i--) { const d = new Date(now); d.setDate(d.getDate() - i); days.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`); }
+    const tot = k => { const x = P.days[k]; return x ? x.in + x.out : 0; };
+    const max = Math.max(1, ...days.map(tot));
+    const month = S.ai.today.slice(0, 7);
+    const monthTot = Object.entries(P.days).filter(([k]) => k.startsWith(month)).reduce((n, [, x]) => n + x.in + x.out, 0);
+    const rows = (obj, label) => Object.entries(obj).sort((x, y) => (y[1].in + y[1].out) - (x[1].in + x[1].out))
+      .map(([k, x]) => `<tr><td>${esc(label(k))}</td><td>${x.calls}</td><td>${fmtN(x.in)}</td><td>${fmtN(x.out)}</td></tr>`).join("");
+    return `<div class="ucard"><div class="aic-h"><b>${PN[p]}</b><span class="muted small">${P.calls} request${P.calls === 1 ? "" : "s"}</span></div>
+      <div class="ustat"><div><b>${fmtN(P.in + P.out)}</b><small>total tokens</small></div><div><b>${fmtN(P.in)}</b><small>input</small></div><div><b>${fmtN(P.out)}</b><small>output</small></div></div>
+      <p class="note">Today ${fmtN(tot(S.ai.today))} tokens — this month ${fmtN(monthTot)} tokens</p>
+      <div class="ubars" aria-label="Tokens per day, last 14 days">${days.map(k => `<span style="height:${Math.max(tot(k) ? 6 : 2, tot(k) / max * 100)}%" class="${tot(k) ? "" : "zero"}" title="${k}: ${tot(k)} tokens"></span>`).join("")}</div>
+      <div class="ubars-l"><span>2 weeks ago</span><span>Today</span></div>
+      <table class="utab"><tr><th>Feature</th><th>Requests</th><th>In</th><th>Out</th></tr>${rows(P.features, k => FEAT[k] || k)}</table>
+      <table class="utab"><tr><th>Model</th><th>Requests</th><th>In</th><th>Out</th></tr>${rows(P.models, k => k)}</table></div>`;
+  }
+  function renderAI() {
+    const el = $("#aisheet"), keep = el.scrollTop;
+    el.classList.toggle("open", aiOpen); lockBody();
+    if (!aiOpen) return;
+    const A = S.ai;
+    const card = p => {
+      const key = A.keys[p], ml = (A.models[p] || {}).list || [], cur = A.model[p];
+      const opts = ml.some(m => m.id === cur) ? ml : [{ id: cur, name: cur }].concat(ml);
+      return `<div class="aicard ${A.provider === p ? "active" : ""}">
+        <div class="aic-h"><b>${PN[p]}</b>${A.provider === p ? `<span class="badge-ai">In use</span>` : key ? `<button class="sm" data-act="aiprov" data-v="${p}">Use ${PN[p]}</button>` : ""}</div>
+        <div class="aic-row"><span class="lbl">API key</span>${key ? `<code>${esc(key)}</code>` : `<span class="muted">Not set</span>`}</div>
+        <div class="aic-btns"><button class="sm ${key ? "" : "primary"}" data-act="aikey" data-v="${p}">${key ? "Change key" : "Add key"}</button>
+          ${key ? `<button class="sm" data-act="aitest" data-v="${p}">Test connection</button><button class="sm danger ${aiArmed === "rm" + p ? "armed" : ""}" data-act="airm" data-v="${p}">${aiArmed === "rm" + p ? "Confirm" : "Remove"}</button>` : ""}</div>
+        <label class="aic-row lbl" for="ms-${p}">Model</label>
+        <select id="ms-${p}" class="modelsel" data-p="${p}">${opts.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? "selected" : ""}>${esc(m.name)}${m.name !== m.id ? " — " + esc(m.id) : ""}</option>`).join("")}</select>
+        <div class="aic-btns"><button class="sm" data-act="aimodels" data-v="${p}" ${key && !aiLoading.has(p) ? "" : "disabled"}>${aiLoading.has(p) ? "Loading…" : ml.length ? "Refresh model list" : "Load my models"}</button>
+          <span class="note">${ml.length ? `${ml.length} models, updated ${rel(A.models[p].at)}` : key ? "Loads the models your key can use" : "Add a key to load models"}</span></div>
+      </div>`;
+    };
+    const used = Object.keys(A.usage.p).filter(p => A.usage.p[p].calls);
+    el.innerHTML = `<div class="sh-head"><h2>AI</h2><button class="link" data-act="aiclose">Done</button></div><div class="sh-body">
+      <p class="hint">Keys stay in this iPhone's Keychain. Only the provider marked “In use” is called.</p>
+      ${card("anthropic")}${card("openai")}
+      <h3 class="sec">What AI does</h3>
+      <div class="srow"><div class="grow"><b>Summarise and categorise new posts</b><small class="muted">One request per check; TL;DR, Story and invites run only when you ask</small></div><button class="switch ${S.settings.ai ? "on" : ""}" data-act="toggle" data-v="ai" aria-label="Summarise and categorise new posts"></button></div>
+      <h3 class="sec">Token usage</h3>
+      ${used.length ? used.map(p => usageBlock(p, A.usage.p[p])).join("") : `<p class="muted pad">No AI requests yet.</p>`}
+      ${used.length ? `<div class="aic-btns"><span class="note">Counting since ${new Date(A.usage.since).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</span>
+        <button class="sm danger ${aiArmed === "reset" ? "armed" : ""}" data-act="usagereset">${aiArmed === "reset" ? "Confirm reset" : "Reset counters"}</button></div>` : ""}
+    </div>`;
+    el.scrollTop = keep;
+  }
+  let category = S.settings.category || "all";
+  const catInfo = id => (S.categories || []).find(c => c.id === id) || { id, label: "Other", color: "#94a3b8" };
+  function catsPresent() {
+    const n = {};
+    for (const a of S.articles) { const x = n[a.cat] = n[a.cat] || { n: 0, un: 0 }; x.n++; if (!a.read) x.un++; }
+    return S.categories.filter(c => n[c.id]).map(c => Object.assign({}, c, n[c.id]));
+  }
+  const inCat = a => category === "all" || a.cat === category;
+  function setCat(v) {
+    if (v === category) return;
+    category = v; srcFilter = null; keep.clear(); limit = pageSize();
+    send("set", { k: "category", v });
+    if (view === "story") requestStory(false);
+    render(); scrollTo(0, 0);
+    const el = document.querySelector(`#cats [data-v="${v}"]`);
+    if (el && el.scrollIntoView) el.scrollIntoView({ inline: "center", block: "nearest" });
+  }
+  const TL_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h8M2.5 12h5"/></svg>`;
+  const CHEV = `<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>`;
+  const tlBtn = (a, mini) => `<button class="tlbtn ${mini ? "mini" : ""} ${expanded.has(a.id) ? "on" : ""}" data-act="tldr" data-id="${a.id}" aria-expanded="${expanded.has(a.id)}" aria-label="${expanded.has(a.id) ? "Hide" : "Show"} TL;DR">${TL_ICON}TL;DR${CHEV}</button>`;
+  function inlineTldr(a) {
+    if (!expanded.has(a.id)) return "";
+    const d = tl[a.id];
+    if (!d || d === "loading") return `<div class="tli"><div class="tli-load" role="status"><span class="spin-dot"></span>${S.settings.hasKey ? "Reading and summarising the article…" : "Reading the article…"}</div></div>`;
+    if (d.error) return `<div class="tli"><p class="err">${esc(d.error)}.</p><div class="tli-act"><button class="sm" data-act="tldrretry" data-id="${a.id}">Try again</button><button class="hide" data-act="tldr" data-id="${a.id}">Hide</button></div></div>`;
+    return `<div class="tli">
+      <div class="tli-top">${d.kind === "ai" ? `<span class="badge-ai">✦ AI summary by ${d.provider === "openai" ? "OpenAI" : "Claude"}</span>` : `<span class="badge-ex">Extracted — no AI</span>`}${d.mins ? `<span>${d.mins} min read</span>` : ""}</div>
+      ${d.partial ? `<p class="note">The full page couldn't be read, so this uses the feed excerpt.</p>` : ""}
+      <p class="tli-lead">${esc(d.lead)}</p>
+      ${d.points && d.points.length ? `<ul>${d.points.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+      ${d.why ? `<p class="tli-why"><b>Why it matters:</b> ${esc(d.why)}</p>` : ""}
+      ${!d.why && d.sections && d.sections.length ? `<p class="tli-why"><b>Covers:</b> ${d.sections.map(esc).join(" / ")}</p>` : ""}
+      <div class="tli-act">
+        <button class="sm" data-act="tldrpanel" data-id="${a.id}">${S.settings.hasKey ? "✦ " : ""}Invite to read</button>
+        ${d.kind !== "ai" && S.settings.hasKey ? `<button class="sm" data-act="tldrretry" data-id="${a.id}">✦ Summarise with AI</button>` : ""}
+        <button class="hide" data-act="tldr" data-id="${a.id}">Hide</button>
+      </div>
+    </div>`;
+  }
+  function refreshInline(id) {
+    if (view === "story") return renderStory();
+    const a = byId(id); if (a) refreshCard(a);
+  }
+  const inv = { open: false, who: "", instr: "", busy: false, out: {} };
+  const presets = () => S.cfg.invitePresets || [];
+  const pageSize = () => S.cfg.pageSize || 250;
+  let srcFilter = null, sheetOpen = false, results = null, searching = false, progress = null, armed = null, limit = S.cfg.pageSize || 250, storyBusy = false;
+  const keep = new Set(), adding = new Set(), added = new Set();
+  let groupIdx = {};
+  const DAY = 864e5;
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const byId = id => S.articles.find(a => a.id === id);
+  const srcMap = () => Object.fromEntries(S.sources.map(s => [s.id, s]));
+  const host = u => String(u).replace(/^https?:\/\/(www\.)?/i, "").split(/[\/?#]/)[0];
+
+  // ---- appearance ----
+  const THEMES = [["auto", "Auto"]].concat(Object.keys(S.palettes).map(k => [k, k[0].toUpperCase() + k.slice(1)]));
+  const dark = window.matchMedia ? matchMedia("(prefers-color-scheme: dark)") : { matches: false };
+  function applyLook() {
+    const root = document.documentElement;
+    root.dataset.theme = look.theme === "auto" ? (dark.matches ? "night" : "ink") : look.theme;
+    root.dataset.font = look.font;
+    root.style.setProperty("--ts", look.textSize);
+    document.body.classList.remove("d-comfortable", "d-compact", "d-tiny");
+    document.body.classList.add("d-" + look.density);
+  }
+  const onDark = () => { if (look.theme === "auto") applyLook(); };
+  if (dark.addEventListener) dark.addEventListener("change", onDark); else if (dark.addListener) dark.addListener(onDark);
+  const segRow = (k, opts) => `<div class="seg wide">${opts.map(([v, l]) => `<button class="${String(look[k]) === String(v) ? "on" : ""}" data-act="look" data-k="${k}" data-v="${v}">${l}</button>`).join("")}</div>`;
+  function lookHTML() {
+    return `
+      <div class="lk-row"><span class="lk-l">Colours</span><div class="sws">${THEMES.map(t => `
+        <button class="sw ${look.theme === t[0] ? "on" : ""}" data-act="look" data-k="theme" data-v="${t[0]}" aria-label="${t[1]} colours">
+          <span class="prev" style="${t[0] === "auto" ? `background:linear-gradient(135deg,${S.palettes.ink.paper} 50%,${S.palettes.night.sheet} 50%);color:${S.palettes.night.signal}` : `background:${S.palettes[t[0]].paper};color:${S.palettes[t[0]].ink}`}">Aa<i style="background:${(S.palettes[t[0]] || S.palettes.night).signal}"></i></span>
+          <small>${t[1]}</small></button>`).join("")}</div></div>
+      <div class="lk-row"><span class="lk-l">Layout</span>${segRow("density", [["comfortable", "Comfortable"], ["compact", "Compact"], ["tiny", "Tiny"]])}</div>
+      <div class="lk-row"><span class="lk-l">Text size</span>${segRow("textSize", [[0.92, "Small"], [1, "Default"], [1.12, "Large"], [1.25, "Larger"]])}</div>
+      <div class="lk-row"><span class="lk-l">Headline font</span>${segRow("font", [["sans", "Sans serif"], ["serif", "Serif"]])}</div>`;
+  }
+
+  // ---- bridge → Scriptable (queued so rapid taps aren't lost) ----
+  const q = []; let flushing = false;
+  const pending = {}; let reqN = 0;
+  function send(type, data, cb) {
+    const m = Object.assign({ type }, data);
+    if (cb) { m.req = "r" + (++reqN); pending[m.req] = cb; }
+    q.push(m); if (!flushing) flush();
+  }
+  window.__done = (req, ok, msg) => { const cb = pending[req]; delete pending[req]; if (cb) cb(ok, msg); };
+  function flush() {
+    const m = q.shift();
+    if (!m) { flushing = false; return; }
+    flushing = true;
+    location.href = "blogpulse://a?d=" + encodeURIComponent(JSON.stringify(m));
+    setTimeout(flush, 80);
+  }
+
+  // ---- bridge ← Scriptable ----
+  window.recv = st => {
+    S = st;
+    if (view === "story" && !S.settings.hasKey) view = "unread";
+    adding.forEach(f => { if (S.sources.some(s => s.feed === f)) adding.delete(f); });
+    aiLoading.clear();
+    render(); renderSheet(); renderAI(); renderCfg();
+  };
+  // ── update pitch ──
+  window.__showUpdate = function (u) {
+    if (!u || document.getElementById("upd")) return;
+    var ov = document.createElement("div"); ov.id = "upd";
+    var cards = (u.highlights || []).map(function (h) {
+      return '<div class="updi"><span class="updic">' + escH(h.icon || "✨") + "</span><div><b>" +
+        escH(h.title) + "</b><span>" + escH(h.text || "") + "</span></div></div>";
+    }).join("");
+    var more = u.skipped > 1 ? " (and " + (u.skipped - 1) + " more update" + (u.skipped > 2 ? "s" : "") + ")" : "";
+    ov.innerHTML = '<div class="updp" role="dialog" aria-label="Update available">' +
+      '<div class="updtag">New version ' + escH(u.latest) + "</div>" +
+      '<h2 class="updt">' + escH(u.title || "An update is ready") + "</h2>" +
+      '<div class="upds">You have ' + escH(u.current) + more + ". Here’s what you get:</div>" +
+      '<div class="updl">' + cards + "</div>" +
+      '<div class="updmsg" aria-live="polite"></div>' +
+      '<button class="primary updgo" data-act="upd-now">Update now</button>' +
+      '<button class="updlater" data-act="upd-later">Later, remind me in 2 days</button></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener("click", function (e) { if (e.target === ov) updLater(); });   // outside = Later
+  };
+  function escH(t) { var d = document.createElement("div"); d.textContent = String(t == null ? "" : t); return d.innerHTML; }
+  function updLater() { var ov = document.getElementById("upd"); if (!ov) return; ov.remove(); send("update-later", {}); }
+  function updNow(btn) {
+    var ov = document.getElementById("upd"), msg = ov.querySelector(".updmsg"), later = ov.querySelector(".updlater");
+    btn.disabled = true; btn.textContent = "Updating…"; later.hidden = true; msg.textContent = "";
+    send("update-now", {}, function (ok, res) {
+      if (ok) {
+        ov.querySelector(".updtag").textContent = "Updated to " + res;
+        msg.innerHTML = "<b>✓ Done.</b> Close BlogPulse and open it again to start using the new version.";
+        btn.disabled = false; btn.textContent = "Got it"; btn.dataset.act = "upd-close";
+      } else {
+        msg.textContent = res || "Update failed"; btn.disabled = false; btn.textContent = "Try again"; later.hidden = false;
+      }
+    });
+  }
+  window.onProgress = (d, t) => { progress = t ? [d, t] : null; renderStatus(); };
+  window.onDiscover = res => { results = res; searching = false; renderSheet(); };
+  window.addDone = (feed, ok) => { adding.delete(feed); if (ok) added.add(feed); renderSheet(); };
+  window.onInvite = (id, r) => {
+    inv.busy = false;
+    if (r.error) toast("Invite not written: " + r.error); else inv.out[id] = r;
+    if (tldrId === id) renderTldr();
+  };
+  window.onTldr = (id, d) => { tl[id] = d; if (tldrId === id) renderTldr(); if (expanded.has(id)) refreshInline(id); };
+  window.onStory = busy => { storyBusy = !!busy; if (view === "story") render(); };
+  window.onPicks = pk => {
+    for (const a of S.articles) a.pick = pk.picks[a.id] || 0;
+    S.picksReady = pk.ready; S.rated = pk.n;
+    if (view !== "story") render(); else renderChrome();
+  };
+  window.toast = msg => {
+    const t = $("#toast"); t.textContent = msg; t.classList.add("on");
+    clearTimeout(window.__tt); window.__tt = setTimeout(() => t.classList.remove("on"), 3000);
+  };
+
+  // ---- time helpers ----
+  const sod = ts => { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const sow = ts => { const d = new Date(sod(ts)); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return d.getTime(); };
+  function isoWeek(ts) {
+    const d = new Date(ts); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+    const w1 = new Date(d.getFullYear(), 0, 4);
+    return 1 + Math.round(((d - w1) / DAY - 3 + (w1.getDay() + 6) % 7) / 7);
+  }
+  function rel(ts) {
+    const s = (Date.now() - ts) / 1000;
+    if (s < 60) return "just now";
+    if (s < 3600) return Math.floor(s / 60) + " min ago";
+    if (s < 86400) return Math.floor(s / 3600) + " h ago";
+    if (s < 7 * 86400) return Math.floor(s / 86400) + " d ago";
+    return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  const md = (ts, o) => new Date(ts).toLocaleDateString(undefined, o || { month: "short", day: "numeric" });
+  function label(k) {
+    if (group === "day") {
+      const t = sod(Date.now()), y = new Date(t); y.setDate(y.getDate() - 1);
+      if (k === t) return ["Today", md(k, { weekday: "long", month: "long", day: "numeric" })];
+      if (k === y.getTime()) return ["Yesterday", md(k, { weekday: "long", month: "long", day: "numeric" })];
+      return [md(k, { weekday: "long" }), md(k, { month: "long", day: "numeric" })];
+    }
+    const w = sow(Date.now()), lw = new Date(w); lw.setDate(lw.getDate() - 7);
+    const range = md(k) + " – " + md(k + 6 * DAY);
+    if (k === w) return ["This week", range];
+    if (k === lw.getTime()) return ["Last week", range];
+    return ["Week " + isoWeek(k), range];
+  }
+  const keyOf = ts => group === "week" ? sow(ts) : sod(ts);
+
+  // ---- filtering ----
+  const visible = a => !a.read || keep.has(a.id);
+  function match(a) {
+    if (!inCat(a)) return false;
+    if (srcFilter && a.src !== srcFilter) return false;
+    if (view === "unread") return visible(a);
+    if (view === "new") return a.isNew;
+    if (view === "picks") return !!a.pick && visible(a);
+    if (view === "rated") return a.rating > 0;
+    return true;
+  }
+  function counts() {
+    const c = { unread: 0, new: 0, picks: 0, rated: 0, all: 0 };
+    for (const a of S.articles) {
+      if (!inCat(a) || (srcFilter && a.src !== srcFilter)) continue;
+      c.all++; if (!a.read) c.unread++; if (a.isNew && !a.read) c.new++; if (a.pick && !a.read) c.picks++; if (a.rating) c.rated++;
+    }
+    return c;
+  }
+
+  // ---- chrome ----
+  const TABS = () => (S.settings.hasKey ? [["story", "Story"]] : []).concat([["unread", "Unread"], ["new", "New"], ["picks", "Picks"], ["rated", "Rated"], ["all", "All"]]);
+  function renderStatus() {
+    const st = $("#status"), bar = $("#bar");
+    st.textContent = progress ? `Checking ${progress[0]} of ${progress[1]} blogs…` : S.lastScan ? `Checked ${rel(S.lastScan)}` : "Not checked yet";
+    bar.style.width = progress ? Math.max(4, progress[0] / Math.max(1, progress[1]) * 100) + "%" : "0";
+    $("#top").classList.toggle("busy", !!progress);
+  }
+  function renderCats() {
+    const present = catsPresent();
+    if (category !== "all" && !present.some(c => c.id === category)) category = "all";
+    const un = S.articles.filter(a => !a.read).length;
+    $("#cats").innerHTML = present.length < 2 ? "" :
+      `<button class="cat-pill ${category === "all" ? "on" : ""}" data-act="cat" data-v="all">All topics${un ? `<i>${un}</i>` : ""}</button>` +
+      present.map(c => `<button class="cat-pill ${category === c.id ? "on" : ""}" data-act="cat" data-v="${c.id}" style="--c:${c.color}"><span class="cdot"></span>${esc(c.label)}${c.un ? `<i>${c.un}</i>` : ""}</button>`).join("");
+  }
+  function renderChrome() {
+    renderCats();
+    const c = counts();
+    $("#top").classList.toggle("storymode", view === "story");
+    $("#tabs").innerHTML = TABS().map(([k, l]) =>
+      `<button class="tab ${k === "story" ? "story-tab" : ""} ${view === k ? "on" : ""}" data-act="view" data-v="${k}">${l}${c[k] && ["unread", "new", "picks"].includes(k) ? `<i>${c[k]}</i>` : ""}</button>`).join("");
+    $("#grp").innerHTML = ["day", "week"].map(g => `<button class="${group === g ? "on" : ""}" data-act="group" data-v="${g}">${g === "day" ? "By day" : "By week"}</button>`).join("");
+    const un = {};
+    for (const a of S.articles) if (!a.read) un[a.src] = (un[a.src] || 0) + 1;
+    const inThis = new Set(S.articles.filter(inCat).map(a => a.src));
+    const srcs = S.sources.filter(s => inThis.has(s.id));
+    $("#chips").innerHTML = srcs.length < 2 ? "" :
+      `<button class="chip ${!srcFilter ? "on" : ""}" data-act="chip" data-v="">All blogs</button>` +
+      srcs.slice().sort((x, y) => (un[y.id] || 0) - (un[x.id] || 0)).map(s =>
+        `<button class="chip ${srcFilter === s.id ? "on" : ""}" data-act="chip" data-v="${s.id}">${esc(s.title)}${un[s.id] ? `<i>${un[s.id]}</i>` : ""}</button>`).join("");
+    document.documentElement.style.setProperty("--hh", $("#top").offsetHeight + "px");
+  }
+
+  // ---- list ----
+  function card(a, sm) {
+    const s = sm[a.src] || {};
+    const stars = [1, 2, 3].map(n => `<button class="star ${a.rating >= n ? "on" : ""}" data-act="rate" data-id="${a.id}" data-v="${n}" aria-label="Rate ${n} of 3">★</button>`).join("");
+    const ci = catInfo(a.cat);
+    const ctag = category === "all" ? `<span class="ctag" style="--c:${ci.color}" title="${a.catBy === "ai" ? "Category by AI" : "Category by keywords"}">${esc(ci.label)}</span>` : "";
+    const cls = ["card", a.read ? "read" : "unread", a.isNew && !a.read ? "new" : "", a.pick ? "pick" : ""].join(" ");
+    if (look.density === "tiny") return `<article class="${cls} tiny" id="c-${a.id}">
+      <button class="tick" data-act="read" data-id="${a.id}" aria-label="${a.read ? "Mark unread" : "Mark read"}"></button>
+      <div class="tmain" data-act="open" data-id="${a.id}"><h3>${a.pick ? `<span class="pk" aria-label="Pick for you">✦</span>` : ""}${esc(a.title)}</h3>
+        <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span></div></div>
+      ${tlBtn(a, true)}
+      <div class="stars mini ${a.rating ? "rated" : ""}">${stars}</div>${inlineTldr(a)}</article>`;
+    return `<article class="${cls}" id="c-${a.id}">
+      <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span></div>
+      <h3 data-act="open" data-id="${a.id}">${esc(a.title)}</h3>
+      ${a.desc ? `<p class="desc" data-act="open" data-id="${a.id}">${a.ai ? `<span class="ai">AI summary</span>` : ""}${esc(a.desc)}</p>` : ""}
+      ${inlineTldr(a)}
+      <div class="row">
+        <div class="stars ${a.rating ? "rated" : ""}">${stars}</div>
+        ${a.isNew && !a.read ? `<span class="flag new">New</span>` : ""}${a.pick ? `<span class="flag pick">✦ Pick</span>` : ""}
+        <span class="acts">${tlBtn(a)}<button class="readbtn" data-act="read" data-id="${a.id}">${a.read ? "Mark unread" : "Mark read"}</button></span>
+      </div>
+    </article>`;
+  }
+  function emptyState() {
+    if (!S.sources.length) return `<div class="empty"><h2>Follow your first blog</h2><p>Search for a company or paste any blog address. Every followed blog is checked each time you open the app.</p><button class="primary" data-act="sheet">Add blogs</button></div>`;
+    const msg = {
+      unread: ["You're all caught up", "New posts appear here after the next check."],
+      new: ["Nothing new since your last visit", "Tap refresh to check again."],
+      picks: S.picksReady ? ["No picks right now", "Picks are unread posts similar to the ones you rated ★★★."] : ["Picks learn from your ratings", `Rate at least 4 posts to switch Picks on. You've rated ${S.rated}.`],
+      rated: ["No ratings yet", "Tap the stars under any post — ★★★ means you'd like more like it."],
+      all: ["No posts yet", "Check your blogs with the refresh button."],
+    }[view];
+    return `<div class="empty"><h2>${msg[0]}</h2><p>${msg[1]}</p></div>`;
+  }
+  function render() {
+    applyLook(); renderStatus(); renderChrome();
+    if (view === "story") return renderStory();
+    const list = S.articles.filter(match);
+    if (!list.length) { $("#list").innerHTML = emptyState(); return; }
+    const sm = srcMap(); groupIdx = {};
+    const groups = [];
+    for (const a of list.slice(0, limit)) {
+      const k = keyOf(a.pub);
+      if (!groups.length || groups[groups.length - 1].k !== k) groups.push({ k, items: [] });
+      groups[groups.length - 1].items.push(a);
+    }
+    groups.forEach(g => groupIdx[g.k] = g.items);
+    $("#list").innerHTML = groups.map(g => {
+      const [big, small] = label(g.k), unread = g.items.filter(a => !a.read).length;
+      return `<section><header class="gh"><div><h2>${big}</h2><span>${esc(small)}</span></div>
+        <div class="gh-r"><span class="n">${g.items.length} post${g.items.length > 1 ? "s" : ""}</span>${unread ? `<button data-act="markgroup" data-v="${g.k}">Mark ${unread} read</button>` : ""}</div></header>
+        ${g.items.map(a => card(a, sm)).join("")}</section>`;
+    }).join("") + (list.length > limit ? `<button class="more" data-act="more">Show ${Math.min(pageSize(), list.length - limit)} more</button>` : "");
+  }
+  function refreshCard(a) {
+    const el = document.getElementById("c-" + a.id);
+    if (el) el.outerHTML = card(a, srcMap());
+    renderChrome();
+  }
+
+  // ---- story ----
+  function storyText(t, ids) {
+    return String(t).split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).map(p => {
+      const h = esc(p).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\s*\[(\d+(?:\s*,\s*\d+)*)\]([.,;:!?)]?)/g, (m, g, punct) => `<span class="refw">${g.split(/\s*,\s*/).map(n =>
+          ids[+n] ? `<button class="ref" data-act="open" data-id="${ids[+n]}" aria-label="Open post ${+n + 1}">${+n + 1}</button>` : "").join("")}${punct}</span>`);
+      return `<p>${h}</p>`;
+    }).join("");
+  }
+  function renderStory() {
+    const st = S.story && S.story.scope === storyScope && (S.story.cat || "all") === category ? S.story : null;
+    const scopes = [["new", "Since last visit"], ["today", "Today"], ["week", "This week"]];
+    let h = `<div class="story-bar"><div class="seg">${scopes.map(([k, l]) => `<button class="${storyScope === k ? "on" : ""}" data-act="scope" data-v="${k}">${l}</button>`).join("")}</div></div>`;
+    if (storyBusy || !st) {
+      h += storyBusy
+        ? `<div class="writing" role="status"><h2>Writing your story…</h2><p>Reading the latest posts and connecting the threads. This usually takes 20–40 seconds.</p><div class="ln"></div><div class="ln"></div><div class="ln s"></div></div>`
+        : `<div class="empty"><h2>No story yet</h2><p>Blend the latest ${category !== "all" ? esc(catInfo(category).label) + " " : ""}posts from your blogs into one read.</p><button class="primary" data-act="rewrite">Write the story</button></div>`;
+      $("#list").innerHTML = h; return;
+    }
+    const am = Object.fromEntries(S.articles.map(a => [a.id, a])), sm = srcMap();
+    const posts = st.ids.map(id => am[id]).filter(Boolean);
+    const blogs = new Set(posts.map(a => a.src)).size, unread = posts.filter(a => !a.read).length;
+    h += `<article class="story">
+      <p class="kicker"><span class="badge-ai">✦ AI-written${st.provider ? " by " + (st.provider === "openai" ? "OpenAI" : "Claude") : ""}</span> ${rel(st.at)} from ${posts.length} posts across ${blogs} blog${blogs === 1 ? "" : "s"}${category !== "all" ? " in " + esc(catInfo(category).label) : ""}</p>
+      <h1 class="st-h">${esc(st.headline)}</h1>
+      ${st.dek ? `<p class="dek">${esc(st.dek)}</p>` : ""}
+      ${st.tldr && st.tldr.length ? `<div class="st-tldr"><div class="st-tldr-h"><b>TL;DR</b><span class="badge-ai">✦ AI</span></div><ul>${st.tldr.map(x => `<li>${storyText(x, st.ids).replace(/^<p>|<\/p>$/g, "")}</li>`).join("")}</ul></div>` : ""}
+      ${st.stale ? `<div class="stale"><span>New posts arrived after this was written.</span><button data-act="rewrite">Rewrite</button></div>` : ""}
+      ${st.mustRead && st.mustRead.length ? `<div class="must"><h2>Start with these</h2>${st.mustRead.map(m => { const a = am[m.id]; return a ? `<button class="mr" data-act="open" data-id="${a.id}"><b>${esc(a.title)}</b><small>${esc((sm[a.src] || {}).title || "")}</small><span>${esc(m.why)}</span></button>` : ""; }).join("")}</div>` : ""}
+      ${st.sections.map(s => `<section class="st-sec"><h2>${esc(s.title)}</h2>${storyText(s.body, st.ids)}</section>`).join("")}
+      <div class="st-src"><div class="st-src-h"><h2>Posts in this story</h2>${unread ? `<button class="sm" data-act="storyread">Mark ${unread} read</button>` : ""}</div>
+        ${posts.map(a => `<div class="st-item"><div class="st-row ${a.read ? "read" : ""}"><i>${st.ids.indexOf(a.id) + 1}</i><button class="st-open" data-act="open" data-id="${a.id}"><b>${esc(a.title)}</b><small>${esc((sm[a.src] || {}).title || "")}</small></button>${tlBtn(a, true)}</div>${inlineTldr(a)}</div>`).join("")}
+      </div>
+      <button class="more" data-act="rewrite">Rewrite this story</button>
+    </article>`;
+    $("#list").innerHTML = h;
+  }
+  function requestStory(force) {
+    if (!force && S.story && S.story.scope === storyScope && (S.story.cat || "all") === category) return;
+    storyBusy = true; send("story", { scope: storyScope, cat: category, force: !!force });
+  }
+
+  // ---- TL;DR sheet ----
+  const lockBody = () => document.body.classList.toggle("locked", sheetOpen || !!tldrId || aiOpen || cfgOpen);
+  function openTldr(id, force) {
+    if (tldrId !== id) Object.assign(inv, { open: false, who: "", instr: "", busy: false, out: {} });   // fresh invite for each article
+    tldrId = id;
+    if (force || !tl[id] || tl[id].error) { tl[id] = "loading"; send("tldr", { id, force: !!force }); }
+    renderTldr();
+  }
+  function renderTldr() {
+    const el = $("#tldr"), keepScroll = el.scrollTop;
+    el.classList.toggle("open", !!tldrId); lockBody();
+    const a = tldrId && byId(tldrId);
+    if (!a) return;
+    const d = tl[tldrId], s = srcMap()[a.src] || {};
+    const stars = [1, 2, 3].map(n => `<button class="star ${a.rating >= n ? "on" : ""}" data-act="rate" data-id="${a.id}" data-v="${n}" aria-label="Rate ${n} of 3">★</button>`).join("");
+    let h = `<div class="sh-head"><h2>TL;DR</h2><button class="link" data-act="tldrclose">Done</button></div><div class="tl">
+      <p class="kicker">${esc(s.title || "")} — ${rel(a.pub)}${d && d.mins ? ` — ${d.mins} min read` : ""}</p>
+      <h1 class="tl-h">${esc(a.title)}</h1>`;
+    if (!d || d === "loading") {
+      h += `<div class="writing tight" role="status"><p>${S.settings.hasKey ? "Reading the article and summarising it…" : "Reading the article…"}</p><div class="ln"></div><div class="ln"></div><div class="ln s"></div></div>`;
+    } else if (d.error) {
+      h += `<p class="err">${esc(d.error)}.</p><p class="muted">Open the article to read it in full, or try again.</p><button class="sm" data-act="tldrretry" data-id="${a.id}">Try again</button>`;
+    } else {
+      h += d.kind === "ai"
+        ? `<p><span class="badge-ai">✦ AI summary by ${d.provider === "openai" ? "OpenAI" : "Claude"}</span></p>`
+        : `<p><span class="badge-ex">Extracted from the article — no AI</span></p>`;
+      if (d.note) h += `<p class="note">${esc(d.note)}</p>`;
+      if (d.partial) h += `<p class="note">The full page couldn't be read, so this uses the excerpt from the blog's feed.</p>`;
+      h += `<p class="tl-lead">${esc(d.lead)}</p>`;
+      if (d.points && d.points.length) h += `<ul class="tl-pts">${d.points.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`;
+      if (d.why) h += `<div class="tl-why"><b>Why it matters</b><p>${esc(d.why)}</p></div>`;
+      if (d.sections && d.sections.length) h += `<div class="tl-secs"><b>What the article covers</b><ul>${d.sections.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
+      h += d.kind === "ai" ? `<button class="sm" data-act="tldrretry" data-id="${a.id}">Summarise again</button>`
+        : S.settings.hasKey ? `<button class="sm" data-act="tldrretry" data-id="${a.id}">✦ Summarise with AI</button>`
+        : `<p class="muted small">Add a Claude or OpenAI key under Blogs to get AI summaries.</p>`;
+      h += inviteBlock(a);
+    }
+    h += `<div class="tl-actions"><div class="stars ${a.rating ? "rated" : ""}">${stars}</div>
+      <button class="readbtn" data-act="read" data-id="${a.id}">${a.read ? "Mark unread" : "Mark read"}</button></div>
+      <button class="primary block" data-act="open" data-id="${a.id}">Read the full article</button></div>`;
+    el.innerHTML = h;
+    el.scrollTop = keepScroll;
+  }
+  function inviteBlock(a) {
+    if (!inv.open) return `<button class="inv-open" data-act="invtoggle">${S.settings.hasKey ? "✦ " : ""}Invite someone to read this</button>`;
+    const ai = S.settings.hasKey, out = inv.out[a.id];
+    return `<div class="inv">
+      <div class="inv-h"><b>Invite to read</b><button class="link small" data-act="invtoggle">Hide</button></div>
+      <label class="inv-l">Who it's for<input id="invWho" value="${esc(inv.who)}" placeholder="Optional — e.g. my team, a colleague" autocapitalize="off"></label>
+      ${ai ? `<label class="inv-l">Your instructions<textarea id="invInstr" rows="3" placeholder="e.g. Casual, two sentences, say how it relates to our platform work">${esc(inv.instr)}</textarea></label>
+      <div class="inv-presets">${S.settings.inviteInstr && !inv.instr.trim() ? `<button class="chip last" data-act="invlast">↺ Use my last instructions</button>` : ""}${presets().map(p => `<button class="chip" data-act="invpreset" data-v="${esc(p)}">+ ${esc(p)}</button>`).join("")}</div>
+`
+      : `<p class="note">Without an AI key this uses a simple template. Add a Claude or OpenAI key under Blogs to write invites from your own instructions.</p>`}
+      <button class="primary block" data-act="invgo" data-id="${a.id}" ${inv.busy ? "disabled" : ""}>${inv.busy ? "Writing…" : (out ? "Write again" : (ai ? "✦ Write invite" : "Write invite"))}</button>
+      ${out ? `<div class="inv-out">
+        ${out.kind === "ai" ? `<span class="badge-ai">✦ AI-written by ${out.provider === "openai" ? "OpenAI" : "Claude"}</span>` : `<span class="badge-ex">Template — no AI</span>`}
+        <textarea id="invText" rows="7">${esc(out.text)}</textarea>
+        <div class="inv-actions"><button class="primary" data-act="invshare" data-id="${a.id}">Share…</button><button class="sm" data-act="invcopy" data-id="${a.id}">Copy</button></div>
+      </div>` : ""}
+    </div>`;
+  }
+
+  // ---- blogs sheet ----
+  function renderSheet() {
+    $("#sheet").classList.toggle("open", sheetOpen);
+    lockBody();
+    if (!sheetOpen) return;
+    $("#findBtn").textContent = searching ? "Searching…" : "Find";
+    const following = f => added.has(f) || S.sources.some(s => s.feed === f);
+    const addBtn = r => following(r.feed) ? `<span class="ok">Following</span>`
+      : adding.has(r.feed) ? `<span class="muted">Adding…</span>`
+      : `<button class="primary sm" data-act="add" data-feed="${esc(r.feed)}" data-title="${esc(r.title)}">Follow</button>`;
+    const un = {};
+    for (const a of S.articles) if (!a.read) un[a.src] = (un[a.src] || 0) + 1;
+    let h = "";
+    if (results) {
+      h += `<div class="sec-row"><h3 class="sec">Results <span class="muted">${results.length}</span></h3><button class="link small" data-act="clearres">Clear results</button></div>` + (results.length ? results.map(r => `<div class="srow"><div class="grow"><b>${esc(r.title)}</b>
+        <small>${esc(host(r.feed))}${r.subs ? ` — ${r.subs.toLocaleString()} Feedly followers` : ""}${r.count ? ` — ${r.count} posts in feed` : ""}</small>
+        ${r.latest ? `<small class="muted">Latest: ${esc(r.latest)}</small>` : r.desc ? `<small class="muted">${esc(r.desc)}</small>` : ""}</div>${addBtn(r)}</div>`).join("")
+        : `<p class="muted pad">No feeds found. Try the blog's home page address, or a different name.</p>`);
+    }
+    h += `<h3 class="sec">Following <span class="muted">${S.sources.length}</span></h3>` + (S.sources.length ? S.sources.map(s => `
+      <div class="srow ${s.paused ? "paused" : ""}"><div class="grow"><button class="sinfo" data-act="sfilter" data-id="${s.id}" aria-label="Show posts from ${esc(s.title)}"><b>${esc(s.title)}</b>
+        <small>${un[s.id] || 0} unread — ${s.paused ? "paused" : s.lastFetched ? "checked " + rel(s.lastFetched) : "not checked yet"}</small>
+        ${s.err ? `<small class="err">Last check failed: ${esc(s.err)}</small>` : ""}</button>
+        <select class="catsel" data-id="${s.id}" aria-label="Category for ${esc(s.title)}"><option value="">${s.catLock ? "Auto-detect per post" : "Auto: " + esc(catInfo(s.cat).label) + " (per post)"}</option>${S.categories.map(c => `<option value="${c.id}" ${s.catLock === c.id ? "selected" : ""}>Always ${esc(c.label)}</option>`).join("")}</select></div>
+        <button class="sm" data-act="pause" data-id="${s.id}">${s.paused ? "Resume" : "Pause"}</button>
+        <button class="sm danger ${armed === s.id ? "armed" : ""}" data-act="remove" data-id="${s.id}">${armed === s.id ? "Confirm" : "Remove"}</button></div>`).join("")
+      : `<p class="muted pad">Nothing yet — pick a few below.</p>`);
+    const pop = S.catalog.filter(c => !following(c.feed));
+    if (pop.length) h += `<h3 class="sec">Popular tech blogs</h3>` + pop.map(c => `<div class="srow"><div class="grow"><b>${esc(c.title)}</b><small class="muted">${esc(c.tags)}</small></div>${addBtn(c)}</div>`).join("");
+    $("#sh-dyn").innerHTML = h;
+  }
+  function doFind() {
+    const v = $("#q").value.trim();
+    if (!v || searching) return;
+    searching = true; results = null; $("#q").blur();
+    send("discover", { q: v }); renderSheet();
+  }
+
+  // ---- interactions ----
+  document.addEventListener("click", e => {
+    if (e.target.closest("select, option, input, textarea")) return;   // form controls handle themselves
+    const t = e.target.closest("[data-act]");
+    if (!t) return;
+    const act = t.dataset.act, id = t.dataset.id, v = t.dataset.v, a = id ? byId(id) : null;
+    switch (act) {
+      case "open":
+        if (!a) return;
+        if (S.settings.readOnOpen && !a.read) { a.read = true; keep.add(a.id); setTimeout(() => view === "story" ? render() : refreshCard(a), 300); }
+        send("open", { id }); break;
+      case "read": a.read = !a.read; keep.add(a.id); send("read", { id, v: a.read }); refreshCard(a); if (tldrId) renderTldr(); break;
+      case "tldr":
+        if (expanded.has(id)) expanded.delete(id);
+        else { expanded.add(id); if (!tl[id] || tl[id].error) { tl[id] = "loading"; send("tldr", { id }); } }
+        refreshInline(id); break;
+      case "tldrpanel": openTldr(id, false); inv.open = true; renderTldr(); break;
+      case "invtoggle": inv.open = !inv.open; renderTldr(); break;
+      case "invpreset": {
+        inv.instr = (inv.instr.trim() ? inv.instr.trim().replace(/[.;,]?$/, ". ") : "") + v + ".";
+        const ta = $("#invInstr"); if (ta) ta.value = inv.instr; break;
+      }
+      case "invlast": { inv.instr = S.settings.inviteInstr || ""; const ta = $("#invInstr"); if (ta) ta.value = inv.instr; t.remove(); break; }
+      case "upd-now": updNow(t); break;
+      case "upd-later": updLater(); break;
+      case "upd-close": { const uo = document.getElementById("upd"); if (uo) uo.remove(); break; }
+      case "updcheck": {
+        const um = $("#updmsg"); t.disabled = true; um.textContent = "Checking…";
+        send("update-check", {}, (ok, res) => { t.disabled = false; um.textContent = res || ""; if (/available/.test(res || "")) { cfgOpen = false; renderCfg(); } });
+        break;
+      }
+      case "invgo":
+        if (inv.busy) return;
+        if (inv.instr.trim()) S.settings.inviteInstr = inv.instr.trim();
+        inv.busy = true; send("invite", { id, who: inv.who, instr: inv.instr }); renderTldr(); break;
+      case "invshare": if (inv.out[id]) send("share", { text: inv.out[id].text }); break;
+      case "invcopy": if (inv.out[id]) send("copy", { text: inv.out[id].text }); break;
+      case "tldrretry":
+        if (tldrId === id) openTldr(id, true);
+        else { tl[id] = "loading"; expanded.add(id); send("tldr", { id, force: true }); refreshInline(id); }
+        break;
+      case "tldrclose": tldrId = null; renderTldr(); if (view === "story") render(); break;
+      case "rate": {
+        const n = +v; a.rating = a.rating === n ? 0 : n;
+        if (a.rating) a.read = true;
+        keep.add(a.id); send("rate", { id, v: a.rating }); refreshCard(a); if (tldrId) renderTldr(); break;
+      }
+      case "view":
+        view = v; keep.clear(); limit = pageSize(); send("set", { k: "view", v });
+        if (v === "story") requestStory(false);
+        render(); scrollTo(0, 0); break;
+      case "group": group = v; send("set", { k: "groupBy", v }); render(); break;
+      case "cat": setCat(v); break;
+      case "chip": srcFilter = v || null; keep.clear(); render(); scrollTo(0, 0); break;
+      case "markgroup": {
+        const ids = (groupIdx[v] || []).filter(x => !x.read).map(x => { x.read = true; keep.add(x.id); return x.id; });
+        send("markAll", { ids }); render(); break;
+      }
+      case "more": limit += pageSize(); render(); break;
+      case "refresh": if (!progress) send("refresh", {}); break;
+      case "look": {
+        const k = t.dataset.k, val = k === "textSize" ? +v : v;
+        look[k] = val; send("set", { k, v: val }); render(); renderCfg(); break;
+      }
+      case "scope": storyScope = v; requestStory(false); render(); break;
+      case "rewrite": requestStory(true); render(); scrollTo(0, 0); break;
+      case "storyread": {
+        const ids = (S.story ? S.story.ids : []).map(byId).filter(x => x && !x.read).map(x => { x.read = true; return x.id; });
+        send("markAll", { ids }); render(); break;
+      }
+      case "sheet":
+        sheetOpen = !sheetOpen; armed = null;
+        if (sheetOpen) { results = null; searching = false; $("#q").value = ""; }
+        renderSheet(); if (sheetOpen) $("#sheet").scrollTop = 0; break;
+      case "clearres": results = null; $("#q").value = ""; renderSheet(); break;
+      case "find": doFind(); break;
+      case "add": adding.add(t.dataset.feed); send("add", { feed: t.dataset.feed, title: t.dataset.title }); renderSheet(); break;
+      case "remove":
+        if (armed === id) { armed = null; if (srcFilter === id) srcFilter = null; send("remove", { id }); }
+        else { armed = id; renderSheet(); setTimeout(() => { if (armed === id) { armed = null; renderSheet(); } }, 3500); }
+        break;
+      case "pause": send("pause", { id }); break;
+      case "toggle": S.settings[v] = !S.settings[v]; send("set", { k: v, v: S.settings[v] }); renderCfg(); renderAI(); break;
+      case "aiopen": aiOpen = true; renderAI(); break;
+      case "cfgopen": cfgOpen = true; renderCfg(); break;
+      case "cfgclose": cfgOpen = false; cfgArmed = false; renderCfg(); renderSheet(); break;
+      case "cfgreset": { const d = cfgItem(t.dataset.k); S.cfg[d.k] = d.def; send("cfg", { k: d.k, v: null }); renderCfg(); break; }
+      case "cfgstep": {
+        const d = cfgItem(t.dataset.k), step = d.step || 1;
+        const nv = Number(Math.min(d.max, Math.max(d.min, Number(S.cfg[d.k]) + step * +v)).toFixed(2));
+        S.cfg[d.k] = nv; send("cfg", { k: d.k, v: nv }); renderCfg(); break;
+      }
+      case "cfgall":
+        if (cfgArmed) { cfgArmed = false; send("cfg", { k: "*" }); }
+        else { cfgArmed = true; renderCfg(); setTimeout(() => { if (cfgArmed) { cfgArmed = false; renderCfg(); } }, 3500); }
+        break;
+      case "aiclose": aiOpen = false; renderAI(); break;
+      case "aikey": send("aikey", { v }); break;
+      case "aitest": send("aitest", { v }); break;
+      case "aiprov": send("aiprov", { v }); break;
+      case "aimodels": aiLoading.add(v); renderAI(); send("aimodels", { v }); break;
+      case "airm": if (aiArmed === "rm" + v) { aiArmed = null; send("airm", { v }); } else arm("rm" + v); break;
+      case "usagereset": if (aiArmed === "reset") { aiArmed = null; send("usagereset", {}); } else arm("reset"); break;
+      case "sfilter": srcFilter = id; sheetOpen = false; keep.clear(); if (view === "story") view = "unread"; renderSheet(); render(); scrollTo(0, 0); break;
+    }
+  });
+  // lock the UI scale: no pinch-zoom (double-tap zoom is off via touch-action in CSS)
+  ["gesturestart", "gesturechange", "gestureend"].forEach(ev => document.addEventListener(ev, e => e.preventDefault(), { passive: false }));
+  document.addEventListener("touchmove", e => { if (e.touches.length > 1 || (e.scale && e.scale !== 1)) e.preventDefault(); }, { passive: false });
+  document.addEventListener("change", e => {
+    if (e.target.classList && e.target.classList.contains("catsel")) send("srccat", { id: e.target.dataset.id, v: e.target.value });
+    if (e.target.classList && e.target.classList.contains("modelsel")) send("aimodel", { p: e.target.dataset.p, v: e.target.value });
+    if (e.target.classList && e.target.classList.contains("cfgin")) {
+      const d = cfgItem(e.target.dataset.k);
+      send("cfg", { k: d.k, v: d.type === "lines" ? e.target.value.split("\n") : e.target.value });
+    }
+  });
+  // swipe left/right on the list to move between category pages
+  let sx = 0, sy = 0, st0 = 0;
+  $("#list").addEventListener("touchstart", e => { const t = e.touches[0]; sx = t.clientX; sy = t.clientY; st0 = Date.now(); }, { passive: true });
+  $("#list").addEventListener("touchend", e => {
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    if (Math.abs(dx) < 80 || Math.abs(dy) > 50 || Date.now() - st0 > 700) return;
+    const ids = ["all"].concat(catsPresent().map(c => c.id));
+    if (ids.length < 3) return;
+    const i = ids.indexOf(category), j = Math.max(0, Math.min(ids.length - 1, i + (dx < 0 ? 1 : -1)));
+    if (j !== i) { setCat(ids[j]); toast(j ? catInfo(ids[j]).label : "All topics"); }
+  }, { passive: true });
+  document.addEventListener("input", e => {
+    const t = e.target;
+    if (t.id === "q" && !t.value.trim() && results && !searching) { results = null; renderSheet(); }
+    if (t.id === "invWho") inv.who = t.value;
+    else if (t.id === "invInstr") inv.instr = t.value;
+    else if (t.id === "invText" && tldrId && inv.out[tldrId]) inv.out[tldrId].text = t.value;
+  });
+  $("#q").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); doFind(); } });
+  addEventListener("resize", renderChrome);
+
+  if (view === "story") requestStory(false);
+  render();
+  if (!S.sources.length) { sheetOpen = true; renderSheet(); }
+  setInterval(renderStatus, 30000);
+}
+
+const PALETTE_CSS = Object.entries(PALETTES).map(([k, p]) => `[data-theme=${k}]{--paper:${p.paper};--sheet:${p.sheet};--ink:${p.ink};--ink-2:${p.ink2};--muted:${p.muted};--rule:${p.rule};--signal:${p.signal};--signal-wash:${p.signalWash};--amber:${p.amber};--amber-wash:${p.amberWash};--danger:${p.danger};color-scheme:${p.scheme}}`).join("\n");
+const CSS = `
+:root{
+  --ts:1; --serif: ui-serif, "New York", Georgia, serif; --sans: -apple-system, system-ui, "SF Pro Text", sans-serif; --display: var(--sans);
+  --t:19px; --d:16px; --m:13.5px; --pad:16px;
+}
+html[data-font=serif]{--display:var(--serif)}
+${PALETTE_CSS}
+body.d-compact{--t:16.5px;--d:14.5px;--m:12.5px;--pad:11px}
+body.d-tiny{--t:15.5px;--m:12px;--pad:9px}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{touch-action:pan-x pan-y;-webkit-user-select:none;user-select:none}
+input,textarea,.tl,.story{-webkit-user-select:text;user-select:text}
+html,body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:calc(16px * var(--ts));line-height:1.5;-webkit-text-size-adjust:100%}
+body.locked{overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:inherit}
+button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-radius:6px}
+
+#top{position:sticky;top:0;z-index:5;background:var(--paper);padding:calc(env(safe-area-inset-top) + 12px) 18px 0;border-bottom:1px solid var(--rule)}
+.tb{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.brand{font:700 calc(28px * var(--ts))/1 var(--display);letter-spacing:-.02em;margin:0}
+.status{color:var(--muted);font-size:calc(13.5px * var(--ts));margin-top:6px}
+.tb-a{display:flex;gap:6px}
+.icon{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;background:var(--sheet);border:1px solid var(--rule);font:700 15px/1 var(--display);text-align:center}
+.icon.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.icon svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+#top.busy .spin svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.lk-row{margin-bottom:14px}
+.lk-l{display:block;font-size:calc(13px * var(--ts));font-weight:600;color:var(--ink-2);margin-bottom:6px}
+.sws{display:flex;gap:12px;overflow-x:auto;scrollbar-width:none;padding:3px 3px 2px}
+.sws::-webkit-scrollbar{display:none}
+.sw{display:flex;flex-direction:column;align-items:center;gap:5px;flex:none}
+.sw .prev{position:relative;width:50px;height:50px;border-radius:13px;display:grid;place-items:center;border:1px solid rgba(127,127,127,.35);font:700 18px/1 var(--display)}
+.sw .prev i{position:absolute;right:6px;bottom:6px;width:9px;height:9px;border-radius:5px}
+.sw.on .prev{outline:2.5px solid var(--signal);outline-offset:2px}
+.sw small{font-size:12px;color:var(--ink-2)}
+.sw.on small{color:var(--ink);font-weight:600}
+
+.tabs{display:flex;gap:20px;overflow-x:auto;scrollbar-width:none;margin-top:8px}
+.tabs::-webkit-scrollbar,.chips::-webkit-scrollbar{display:none}
+.tab{padding:10px 0;color:var(--muted);font-weight:600;font-size:calc(15px * var(--ts));white-space:nowrap;border-bottom:2.5px solid transparent}
+.tab.on{color:var(--ink);border-color:var(--signal)}
+.tab.story-tab:not(.on){color:var(--signal)}
+.tab i,.chip i{font-style:normal;font-size:.8em;font-weight:700;margin-left:5px;color:var(--signal)}
+.sub{display:flex;align-items:center;gap:10px;padding:8px 0 10px}
+#top.storymode .sub{display:none}
+.chips{display:flex;gap:6px;overflow-x:auto;flex:1;scrollbar-width:none}
+.chip{white-space:nowrap;font-size:calc(13.5px * var(--ts));padding:5px 12px;border-radius:15px;border:1px solid var(--rule);background:var(--sheet);color:var(--ink-2)}
+.chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.chip.on i{color:inherit;opacity:.8}
+.seg{display:flex;border:1px solid var(--rule);border-radius:9px;overflow:hidden;flex:none;background:var(--sheet)}
+.sub .seg{margin-left:auto}
+.seg button{font-size:calc(12.5px * var(--ts));padding:6px 10px;color:var(--ink-2);white-space:nowrap}
+.seg button.on{background:var(--ink);color:var(--paper);font-weight:600}
+.seg.wide button{flex:1;text-align:center;padding:9px 4px;font-size:calc(13.5px * var(--ts))}
+.prog{height:2px;margin:0 -18px}
+#bar{height:2px;width:0;background:var(--signal);transition:width .3s}
+
+.gh{position:sticky;top:var(--hh,150px);z-index:2;background:var(--paper);display:flex;justify-content:space-between;align-items:flex-end;padding:22px 18px 8px;gap:10px}
+body.d-compact .gh,body.d-tiny .gh{padding-top:14px}
+.gh h2{font:700 calc(21px * var(--ts))/1.15 var(--display);margin:0}
+.gh div>span{display:block;color:var(--muted);font-size:calc(13px * var(--ts));margin-top:3px}
+.gh-r{display:flex;flex-direction:column;align-items:flex-end;gap:3px;font-size:calc(12.5px * var(--ts));color:var(--muted)}
+.gh-r button{color:var(--signal);font-weight:600;font-size:calc(13.5px * var(--ts))}
+
+.card{background:var(--sheet);padding:var(--pad) 18px calc(var(--pad) - 6px);border-top:1px solid var(--rule);position:relative}
+section .card:last-child{border-bottom:1px solid var(--rule)}
+.card.new::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--signal)}
+.card.pick{box-shadow:inset 0 3px 0 var(--amber)}
+.meta{display:flex;justify-content:space-between;gap:10px;font-size:calc(var(--m) * var(--ts));color:var(--muted)}
+.src{font-weight:600;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.when{flex:none}
+.card h3{font:600 calc(var(--t) * var(--ts))/1.3 var(--display);margin:5px 0;letter-spacing:-.005em;max-width:70ch}
+.card.read h3{font-weight:500;color:var(--muted)}
+.desc{margin:0;color:var(--ink-2);font-size:calc(var(--d) * var(--ts));line-height:1.55;max-width:68ch;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+body.d-compact .desc{-webkit-line-clamp:2;line-height:1.45}
+.card.read .desc{color:var(--muted)}
+.ai{font-size:.72em;font-weight:700;color:var(--signal);background:var(--signal-wash);border-radius:4px;padding:1px 5px;margin-right:6px;vertical-align:.1em}
+.row{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;margin-top:4px}
+.stars{display:flex}
+.star{font-size:calc(21px * var(--ts));line-height:1;padding:6px 3px;color:var(--rule)}
+body.d-compact .star{font-size:calc(17px * var(--ts));padding:4px 2px}
+.star.on{color:var(--amber)}
+.flag{font-size:calc(12.5px * var(--ts));font-weight:600;border-radius:5px;padding:2px 7px;white-space:nowrap}
+.flag.new{color:var(--signal);background:var(--signal-wash)}
+.flag.pick{color:var(--amber);background:var(--amber-wash)}
+.readbtn{margin-left:auto;font-size:calc(13.5px * var(--ts));color:var(--muted);padding:6px 0 6px 10px;white-space:nowrap}
+.card.unread .readbtn{color:var(--signal);font-weight:600}
+
+.card.tiny{display:flex;align-items:center;gap:8px;padding:var(--pad) 10px var(--pad) 10px}
+.tick{width:28px;height:28px;flex:none;display:grid;place-items:center}
+.tick::after{content:"";width:9px;height:9px;border-radius:5px;background:var(--signal)}
+.card.read .tick::after{background:transparent;box-shadow:inset 0 0 0 1.5px var(--muted)}
+.tmain{flex:1;min-width:0}
+.card.tiny h3{margin:0 0 2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card.tiny .meta{justify-content:flex-start}
+.pk{color:var(--amber);margin-right:5px}
+.stars.mini .star{font-size:calc(15px * var(--ts));padding:6px 1px}
+
+.more{display:block;margin:18px auto 40px;padding:10px 18px;border:1px solid var(--rule);border-radius:10px;background:var(--sheet);font-weight:600}
+.empty{padding:70px 28px;text-align:center;color:var(--ink-2)}
+.empty h2{font:700 calc(24px * var(--ts))/1.2 var(--display);color:var(--ink);margin:0 0 8px}
+.empty p{max-width:34ch;margin:0 auto 20px}
+#list{padding-bottom:28px}
+
+.story-bar{max-width:720px;margin:0 auto;padding:16px 18px 0}
+.story-bar .seg button{flex:1;text-align:center;padding:9px 4px;font-size:calc(13.5px * var(--ts))}
+.story{max-width:720px;margin:0 auto;padding:12px 20px 30px}
+.kicker{color:var(--muted);font-size:calc(13.5px * var(--ts));margin:10px 0}
+.st-h{font:700 calc(30px * var(--ts))/1.15 var(--display);letter-spacing:-.02em;margin:0 0 10px}
+.dek{font-size:calc(18.5px * var(--ts));line-height:1.5;color:var(--ink-2);margin:0 0 18px}
+.stale{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--signal-wash);border-radius:10px;padding:10px 14px;font-size:calc(14px * var(--ts));margin-bottom:18px}
+.stale button{color:var(--signal);font-weight:700;flex:none}
+.must{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:2px 0 10px;margin:6px 0 10px}
+.must h2,.st-sec h2,.st-src h2{font:700 calc(20px * var(--ts))/1.25 var(--display);margin:20px 0 8px}
+.mr{display:block;width:100%;padding:8px 0 8px 14px;border-left:3px solid var(--amber);margin:10px 0}
+.mr b{display:block;font-size:calc(16.5px * var(--ts));line-height:1.35}
+.mr small{display:block;color:var(--muted);font-size:calc(13px * var(--ts));margin:2px 0 4px}
+.mr span{display:block;color:var(--ink-2);font-size:calc(15px * var(--ts))}
+.st-sec p{font-size:calc(17.5px * var(--ts));line-height:1.65;margin:0 0 14px;max-width:66ch}
+html[data-font=serif] .st-sec p{font-family:var(--serif)}
+.refw{white-space:nowrap}
+.ref{display:inline-block;min-width:1.6em;margin-left:3px;padding:0 .35em;border-radius:6px;background:var(--signal-wash);color:var(--signal);font:700 calc(12px * var(--ts))/1.7 var(--sans);text-align:center;vertical-align:.15em}
+.st-src{margin-top:28px;border-top:1px solid var(--rule)}
+.st-src-h{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.st-row{display:flex;gap:12px;width:100%;padding:10px 0;border-bottom:1px solid var(--rule)}
+.st-row i{font:700 calc(12px * var(--ts))/1 var(--sans);font-style:normal;color:var(--signal);background:var(--signal-wash);border-radius:6px;min-width:1.9em;height:1.9em;display:grid;place-items:center;flex:none;margin-top:2px}
+.st-row b{display:block;font-weight:600;font-size:calc(15.5px * var(--ts));line-height:1.35}
+.st-row small{color:var(--muted);font-size:calc(13px * var(--ts))}
+.st-row.read b{font-weight:500;color:var(--muted)}
+.writing{max-width:720px;margin:0 auto;padding:36px 20px}
+.writing h2{font:700 calc(24px * var(--ts))/1.2 var(--display);margin:0 0 8px}
+.writing p{color:var(--ink-2);margin:0 0 20px}
+.ln{height:14px;border-radius:7px;background:var(--rule);margin:14px 0;animation:pulse 1.4s ease-in-out infinite}
+.ln.s{width:60%}
+@keyframes pulse{50%{opacity:.4}}
+
+.primary{background:var(--ink);color:var(--paper);font-weight:600;border-radius:10px;padding:10px 16px}
+.sm{font-size:calc(13px * var(--ts));padding:6px 11px;border-radius:8px;border:1px solid var(--rule);background:var(--sheet);white-space:nowrap}
+.primary.sm{border-color:var(--ink);background:var(--ink)}
+.danger{color:var(--danger)}
+.danger.armed{background:var(--danger);color:#fff;border-color:var(--danger)}
+.ok{font-size:calc(13px * var(--ts));color:var(--signal);font-weight:600}
+.muted{color:var(--muted)}
+.err{color:var(--danger)}
+
+.sheet{position:fixed;inset:0;z-index:10;background:var(--paper);transform:translateY(102%);transition:transform .28s ease;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.sheet.open{transform:none}
+.sh-head{position:sticky;top:0;z-index:2;background:var(--paper);display:flex;justify-content:space-between;align-items:center;padding:calc(env(safe-area-inset-top) + 14px) 18px 12px;border-bottom:1px solid var(--rule)}
+.sh-head h2{font:700 calc(24px * var(--ts))/1 var(--display);margin:0}
+.link{color:var(--signal);font-weight:600;font-size:16px}
+.sh-body{padding:16px 18px calc(env(safe-area-inset-bottom) + 40px)}
+.field{display:flex;gap:8px}
+.field input{flex:1;min-width:0;font:16px var(--sans);padding:11px 13px;border-radius:10px;border:1px solid var(--rule);background:var(--sheet);color:var(--ink)}
+.field input:focus{outline:2px solid var(--signal);outline-offset:-1px}
+.hint{font-size:calc(13px * var(--ts));color:var(--muted);margin:8px 2px 0}
+.sec{font:700 calc(17px * var(--ts))/1.2 var(--display);margin:26px 0 6px}
+.srow{display:flex;align-items:center;gap:8px;padding:11px 0;border-bottom:1px solid var(--rule)}
+.srow.paused{opacity:.55}
+.grow{flex:1;min-width:0}
+.grow b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grow small{display:block;font-size:calc(13px * var(--ts));color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pad{padding:8px 0}
+.switch{width:46px;height:28px;border-radius:14px;background:var(--rule);position:relative;flex:none;transition:background .2s}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:11px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .2s}
+.switch.on{background:var(--signal)}
+.switch.on::after{transform:translateX(18px)}
+
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 22px);transform:translate(-50%,20px);opacity:0;pointer-events:none;z-index:20;
+  background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:12px;font-size:14px;font-weight:500;max-width:88vw;text-align:center;transition:opacity .2s,transform .2s}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+.tlbtn{display:inline-flex;align-items:center;gap:4px;flex:none;min-height:32px;padding:4px 10px 4px 9px;border-radius:16px;background:var(--signal-wash);color:var(--signal);border:1.5px solid var(--signal);font-weight:700;font-size:calc(13px * var(--ts));letter-spacing:.01em;white-space:nowrap;transition:transform .1s,background .15s}
+.tlbtn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.tlbtn .chev{width:12px;height:12px;transition:transform .2s}
+.tlbtn.on{background:var(--signal);color:var(--sheet)}
+.tlbtn.on .chev{transform:rotate(180deg)}
+.tlbtn:active{transform:scale(.95)}
+.tlbtn.mini{min-height:28px;padding:2px 7px;font-size:calc(12px * var(--ts));gap:3px}
+.tlbtn.mini .chev{display:none}
+.tli{margin:10px 0 4px;padding:12px 14px;border-radius:12px;background:var(--paper);border:1px solid var(--rule);border-left:3px solid var(--signal);-webkit-user-select:text;user-select:text}
+.card.tiny{flex-wrap:wrap}
+.card.tiny .tli{flex-basis:100%;margin:6px 0 2px 36px}
+.st-item .tli{margin:0 0 12px 2.4em}
+.tli-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:calc(12.5px * var(--ts));color:var(--muted)}
+.tli-lead{font-weight:600;font-size:calc(15.5px * var(--ts));line-height:1.45;margin:8px 0 6px;color:var(--ink)}
+.tli ul{margin:0 0 6px;padding-left:1.15em}
+.tli li{font-size:calc(14.5px * var(--ts));line-height:1.5;margin-bottom:4px;color:var(--ink-2)}
+.tli-why{font-size:calc(14px * var(--ts));line-height:1.5;color:var(--ink-2);margin:6px 0}
+.tli-act{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.tli-act .hide{margin-left:auto;color:var(--muted);font-weight:600;font-size:calc(13.5px * var(--ts));padding:6px 2px}
+.tli-load{display:flex;align-items:center;gap:10px;color:var(--ink-2);font-size:calc(14px * var(--ts))}
+.spin-dot{width:15px;height:15px;flex:none;border-radius:50%;border:2px solid var(--rule);border-top-color:var(--signal);animation:spin .8s linear infinite}
+.readbtn{margin-left:auto}
+.acts{margin-left:auto;display:flex;align-items:center;gap:6px}
+.acts .readbtn{margin-left:0}
+.badge-ai{display:inline-block;font-size:calc(12px * var(--ts));font-weight:700;color:var(--signal);background:var(--signal-wash);border-radius:6px;padding:2px 8px}
+.badge-ex{display:inline-block;font-size:calc(12px * var(--ts));font-weight:600;color:var(--ink-2);border:1px dashed var(--muted);border-radius:6px;padding:1px 8px}
+#tldr{z-index:12}
+.tl{max-width:680px;margin:0 auto;padding:6px 20px calc(env(safe-area-inset-bottom) + 40px)}
+.tl-h{font:700 calc(24px * var(--ts))/1.2 var(--display);margin:0 0 12px}
+.tl-lead{font-size:calc(18px * var(--ts));line-height:1.55;font-weight:500;margin:10px 0 12px}
+.tl-pts{padding-left:1.2em;margin:0 0 16px}
+.tl-pts li{font-size:calc(16.5px * var(--ts));line-height:1.55;margin-bottom:8px}
+.tl-why{background:var(--sheet);border-left:3px solid var(--signal);border-radius:0 10px 10px 0;padding:10px 14px;margin:0 0 16px}
+.tl-why p{margin:4px 0 0;color:var(--ink-2)}
+.tl-secs{margin:0 0 16px}
+.tl-secs ul{margin:6px 0 0;padding-left:1.2em;color:var(--ink-2)}
+.note{font-size:calc(13.5px * var(--ts));color:var(--muted);margin:6px 0}
+.small{font-size:calc(13.5px * var(--ts))}
+.tl-actions{display:flex;align-items:center;gap:8px;margin:22px 0 12px;border-top:1px solid var(--rule);padding-top:10px}
+.primary.block{display:block;width:100%;text-align:center;padding:13px 16px}
+.writing.tight{padding:12px 0}
+.st-tldr{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:12px 16px;margin:0 0 18px}
+.st-tldr-h{display:flex;align-items:center;gap:8px}
+.st-tldr ul{margin:8px 0 0;padding-left:1.2em}
+.st-tldr li{font-size:calc(16.5px * var(--ts));line-height:1.55;margin-bottom:6px}
+.inv-open{display:block;width:100%;text-align:center;margin:22px 0 4px;padding:12px;border:1px dashed var(--signal);border-radius:10px;color:var(--signal);font-weight:600}
+.inv{margin:22px 0 4px;padding:14px;border:1px solid var(--rule);border-radius:12px;background:var(--sheet)}
+.inv-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.inv-l{display:block;font-size:calc(13px * var(--ts));font-weight:600;color:var(--ink-2);margin:10px 0 0}
+.inv input,.inv textarea{display:block;width:100%;margin-top:5px;font:16px/1.45 var(--sans);padding:10px 12px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);-webkit-user-select:text;user-select:text}
+.inv textarea{resize:vertical}
+.inv input:focus,.inv textarea:focus{outline:2px solid var(--signal);outline-offset:-1px}
+.inv-presets{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 2px}
+.inv .primary.block{margin-top:12px}
+.inv .primary[disabled]{opacity:.6}
+.inv-out{margin-top:14px}
+.inv-out textarea{margin-top:8px}
+.inv-actions{display:flex;gap:8px;margin-top:10px}
+.inv-actions .primary{flex:1;text-align:center}
+.link.small{font-size:calc(14px * var(--ts))}
+.cats{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:12px -18px 0;padding:0 18px}
+.cats:empty{display:none}
+.cats::-webkit-scrollbar{display:none}
+.cat-pill{display:inline-flex;align-items:center;gap:6px;flex:none;white-space:nowrap;padding:7px 13px;border-radius:18px;background:var(--sheet);border:1px solid var(--rule);font-weight:600;font-size:calc(14px * var(--ts));color:var(--ink-2)}
+.cat-pill i{font-style:normal;font-size:.8em;font-weight:700;color:var(--muted)}
+.cat-pill .cdot{width:9px;height:9px;border-radius:5px;background:var(--c)}
+.cat-pill.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.cat-pill.on i{color:inherit;opacity:.75}
+.ml{display:flex;align-items:center;gap:8px;min-width:0}
+.ctag{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:.92em;font-weight:600;color:var(--ink-2)}
+.ctag::before{content:"";width:7px;height:7px;border-radius:4px;background:var(--c)}
+.catsel{margin-top:6px;max-width:100%;font:calc(13px * var(--ts)) var(--sans);color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:8px;padding:5px 8px}
+.chip.last{border-color:var(--signal);color:var(--signal)}
+#cfgsheet{z-index:13}
+#upd{position:fixed;inset:0;z-index:48;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
+.updp{width:100%;background:var(--sheet);color:var(--ink);border-radius:22px 22px 0 0;padding:20px 18px calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px;animation:updup .25s ease-out}
+@keyframes updup{from{transform:translateY(40px);opacity:.4}}
+.updtag{align-self:flex-start;background:var(--signal);color:var(--sheet);font-size:12px;font-weight:800;padding:4px 10px;border-radius:999px;letter-spacing:.02em}
+.updt{margin:6px 0 0;font:700 calc(22px * var(--ts))/1.2 var(--display);letter-spacing:-.01em}
+.upds{color:var(--muted);font-size:calc(14px * var(--ts))}
+.updl{display:flex;flex-direction:column;gap:10px;margin:8px 0 6px}
+.updi{display:flex;gap:12px;align-items:flex-start;background:var(--paper);border-radius:14px;padding:12px}
+.updic{font:24px/1.1 "Apple Color Emoji","Noto Color Emoji",sans-serif;flex:none;width:30px;text-align:center}
+.updi b{display:block;font-size:calc(15px * var(--ts))}
+.updi span{display:block;color:var(--muted);font-size:calc(13px * var(--ts));line-height:1.35;margin-top:2px}
+.updmsg{font-size:calc(14px * var(--ts))}
+.updmsg:empty{display:none}
+.updgo{padding:13px;font-size:16px;text-align:center}
+.updgo[disabled]{opacity:.6}
+.updlater{padding:11px;background:var(--paper);border-radius:10px;text-align:center;font-weight:600;color:var(--ink-2)}
+.ver{text-align:center;color:var(--muted);font-size:12px;margin:0;padding:0 0 calc(env(safe-area-inset-bottom) + 24px)}
+#aisheet{z-index:14}
+.sec-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.sinfo{display:block;width:100%;text-align:left}
+.sinfo b,.sinfo small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sinfo small{font-size:calc(13px * var(--ts));color:var(--ink-2)}
+#cfgsheet .lk-row{margin:10px 0 14px}
+.cfg{padding:12px 0;border-bottom:1px solid var(--rule)}
+.cfg.ch .cfg-h b::after{content:"";display:inline-block;width:7px;height:7px;border-radius:4px;background:var(--signal);margin-left:7px;vertical-align:2px}
+.cfg-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.cfg-h b{font-weight:600}
+.cfg small{display:block;font-size:calc(13px * var(--ts));margin-top:2px}
+.stepper{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap}
+.stepper button{width:38px;height:36px;border-radius:9px;border:1px solid var(--rule);background:var(--sheet);font-size:20px;font-weight:600;text-align:center}
+.stepper button[disabled]{opacity:.35}
+.stepper input{width:86px;text-align:center;font:600 16px var(--sans);padding:7px 6px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);-webkit-user-select:text;user-select:text}
+.stepper .unit{font-size:calc(14px * var(--ts));color:var(--ink-2);min-width:2.5em}
+.stepper .range{flex-basis:100%;font-size:calc(12px * var(--ts));color:var(--muted)}
+.cfgin.wide{display:block;width:100%;margin-top:8px;font:15px/1.45 var(--sans);padding:9px 11px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);-webkit-user-select:text;user-select:text}
+textarea.cfgin.wide{resize:vertical}
+.cfgin:focus{outline:2px solid var(--signal);outline-offset:-1px}
+.cfg-foot{margin-top:18px}
+.aicard,.ucard{background:var(--sheet);border:1px solid var(--rule);border-radius:14px;padding:14px;margin:14px 0}
+.aicard.active{border-color:var(--signal);box-shadow:0 0 0 1px var(--signal)}
+.aic-h{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:calc(17px * var(--ts))}
+.aic-row{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:calc(14px * var(--ts))}
+.aic-row.lbl,.aic-row .lbl{font-weight:600;color:var(--ink-2)}
+.aicard code{font:calc(13px * var(--ts)) ui-monospace,Menlo,monospace;background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:2px 6px}
+.aic-btns{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
+.aic-btns .note{margin:0}
+.sm[disabled]{opacity:.5}
+.modelsel{display:block;width:100%;margin-top:6px;font:16px var(--sans);color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:9px;padding:9px 10px}
+.ustat{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 4px}
+.ustat div{background:var(--paper);border-radius:10px;padding:8px 10px}
+.ustat b{display:block;font:700 calc(20px * var(--ts))/1.2 var(--display)}
+.ustat small{color:var(--muted);font-size:calc(12px * var(--ts))}
+.ubars{display:flex;align-items:flex-end;gap:3px;height:56px;margin-top:10px}
+.ubars span{flex:1;background:var(--signal);border-radius:3px 3px 0 0;min-height:2px}
+.ubars span.zero{background:var(--rule)}
+.ubars-l{display:flex;justify-content:space-between;font-size:calc(11.5px * var(--ts));color:var(--muted);margin-top:4px}
+.utab{width:100%;border-collapse:collapse;margin-top:12px;font-size:calc(13px * var(--ts))}
+.utab th{text-align:left;font-weight:600;color:var(--muted);padding:4px 4px 4px 0;border-bottom:1px solid var(--rule)}
+.utab td{padding:6px 4px 6px 0;border-bottom:1px solid var(--rule);color:var(--ink-2);word-break:break-word}
+.utab th:not(:first-child),.utab td:not(:first-child){text-align:right;white-space:nowrap}
+.st-row{align-items:flex-start}
+.st-open{flex:1;min-width:0;display:block}
+.st-row .tlbtn{flex:none;margin-top:2px}
+@media (prefers-reduced-motion: reduce){.updp{animation:none}.spin-dot{animation-duration:2.4s}.tlbtn,.tlbtn .chev{transition:none}#top.busy .spin svg,.ln{animation:none}.sheet,#toast,#bar{transition:none}}
+`;
+
+const REFRESH_SVG = `<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>`;
+const ADD_SVG = `<svg viewBox="0 0 24 24"><path d="M4 6h10M4 12h10M4 18h7M18 14v8M14 18h8"/></svg>`;
+const SETTINGS_SVG = `<svg viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>`;
+const THEME_IDS = ["ink", "sepia", "mint", "contrast", "slate", "night"];
+const initTheme = THEME_IDS.includes(settings.theme) ? settings.theme : (Device.isUsingDarkAppearance() ? "night" : "ink");
+
+const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-font="${settings.font === "serif" ? "serif" : "sans"}" style="--ts:${+settings.textSize || 1}"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<style>${CSS}</style></head><body class="d-${["compact", "tiny"].includes(settings.density) ? settings.density : "comfortable"}">
+<header id="top">
+  <div class="tb"><div><h1 class="brand">BlogPulse</h1><div id="status" class="status"></div></div>
+    <div class="tb-a"><button class="icon" data-act="cfgopen" aria-label="Settings">${SETTINGS_SVG}</button>
+    <button class="icon" data-act="sheet" aria-label="Add and manage blogs">${ADD_SVG}</button>
+    <button class="icon spin" data-act="refresh" aria-label="Check for new posts">${REFRESH_SVG}</button></div></div>
+  <nav id="cats" class="cats" aria-label="Categories"></nav>
+  <nav id="tabs" class="tabs"></nav>
+  <div class="sub"><div id="chips" class="chips"></div><div id="grp" class="seg"></div></div>
+  <div class="prog"><div id="bar"></div></div>
+</header>
+<main id="list"></main>
+<p class="ver">BlogPulse v${VERSION}</p>
+<div id="sheet" class="sheet" aria-label="Manage blogs">
+  <div class="sh-head"><h2>Blogs</h2><button class="link" data-act="sheet">Done</button></div>
+  <div class="sh-body">
+    <div class="field"><input id="q" type="search" placeholder="Company name or blog address" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search"><button id="findBtn" class="primary" data-act="find">Find</button></div>
+    <p class="hint">Try “kubernetes” or “netflix”, or paste any blog address — the feed is found for you.</p>
+    <div id="sh-dyn"></div>
+  </div>
+</div>
+<div id="tldr" class="sheet" aria-label="TL;DR"></div>
+<div id="aisheet" class="sheet" aria-label="AI settings"></div>
+<div id="cfgsheet" class="sheet" aria-label="Settings"></div>
+<div id="toast" role="status"></div>
+<script>window.__INIT = ${safeJSON(clientState())};
+(${clientApp.toString()})();</script>
+</body></html>`;
+
+// ---------- home-screen widget ----------
+function wcol(key) {
+  if (PALETTES[settings.theme]) return new Color(PALETTES[settings.theme][key]);
+  return Color.dynamic(new Color(PALETTES.ink[key]), new Color(PALETTES.night[key]));
+}
+function latestStory() {
+  const st = Object.values(stories).sort((a, b) => b.at - a.at)[0];
+  return st && Date.now() - st.at < cfg("widgetStoryHours") * 3600e3 ? st : null;
+}
+function staticSummary(fresh, unread) {
+  const base = fresh.length ? fresh : unread;
+  if (!base.length) return "You're all caught up.";
+  const by = {};
+  base.forEach(a => by[a.src] = (by[a.src] || 0) + 1);
+  const names = Object.entries(by).sort((x, y) => y[1] - x[1]).map(([id]) => (sources.find(s => s.id === id) || {}).title).filter(Boolean);
+  const who = names.length > 2 ? `${names.slice(0, 2).join(", ")} and ${names.length - 2} more` : names.join(" and ");
+  return `${base.length} ${fresh.length ? "new" : "unread"} post${base.length > 1 ? "s" : ""} from ${who}.`;
+}
+function topPick(list, unread, fresh) {
+  const pk = computePicks(list, cfg("picksMinRatings"), cfg("picksThreshold"));
+  const best = unread.filter(a => pk.picks[a.id]).sort((a, b) => pk.picks[b.id] - pk.picks[a.id])[0];
+  if (best) return { a: best, why: "Top pick for you" };
+  const st = latestStory();
+  const mr = st && (st.mustRead || []).map(m => articles[m.id]).find(a => a && !a.read);
+  if (mr) return { a: mr, why: "Top pick from your story" };
+  if (fresh[0]) return { a: fresh[0], why: "Newest post" };
+  if (unread[0]) return { a: unread[0], why: "Newest unread" };
+  return null;
+}
+async function runWidget() {
+  if (sources.length && Date.now() - (settings.lastScan || 0) > cfg("widgetScanAfterMin") * 60e3) {
+    await Promise.race([scanAll(() => {}).catch(() => {}), new Promise(r => Timer.schedule(cfg("widgetScanBudget") * 1000, false, r))]);
+    saveAll(false);   // don't touch "last visit", so new posts stay new in the app
+  }
+  const fam = config.widgetFamily || "medium";
+  const small = fam === "small", large = fam === "large" || fam === "extraLarge";
+  const list = Object.values(articles).sort((a, b) => b.pub - a.pub);
+  const unread = list.filter(a => !a.read);
+  const fresh = unread.filter(a => !a.seeded && a.seen > prevSession);
+  const pick = topPick(list, unread, fresh);
+  const st = latestStory();
+  const srcTitle = a => (sources.find(s => s.id === a.src) || {}).title || "";
+  const txt = (stack, str, font, color, lines) => { const t = stack.addText(str); t.font = font; t.textColor = wcol(color); if (lines) t.lineLimit = lines; return t; };
+
+  const w = new ListWidget();
+  w.backgroundColor = wcol("paper");
+  w.setPadding(14, 16, 14, 16);
+  w.refreshAfterDate = new Date(Date.now() + cfg("widgetRefreshMin") * 60e3);
+  w.url = small && pick ? pick.a.link : URLScheme.forRunningScript();
+
+  const hd = w.addStack(); hd.centerAlignContent();
+  txt(hd, "BlogPulse", Font.boldSystemFont(small ? 13 : 15), "ink");
+  hd.addSpacer();
+  txt(hd, fresh.length ? `${fresh.length} new` : `${unread.length} unread`, Font.semiboldSystemFont(12), "signal");
+  w.addSpacer(small ? 6 : 5);
+
+  if (!sources.length) {
+    txt(w, "Open BlogPulse to follow your first blogs.", Font.systemFont(13), "ink2");
+  } else {
+    if (!small) {
+      const row = w.addStack(); row.spacing = 4;
+      if (st) txt(row, "✦", Font.boldSystemFont(12), "signal");
+      txt(row, st ? (st.dek || st.headline) : staticSummary(fresh, unread), Font.systemFont(12.5), "ink2", large ? 4 : 2);
+      w.addSpacer(large ? 12 : 8);
+    }
+    if (pick) {
+      const ps = w.addStack(); ps.layoutVertically(); ps.spacing = 2;
+      if (!small) ps.url = pick.a.link;
+      txt(ps, small ? "Top pick" : pick.why, Font.semiboldSystemFont(11), "amber");
+      txt(ps, pick.a.title, Font.semiboldSystemFont(small ? 13 : 15), "ink", small ? 4 : 2);
+      txt(ps, srcTitle(pick.a), Font.systemFont(11), "muted", 1);
+      if (large) {
+        const d = (pick.a.tldr && pick.a.tldr.lead) || pick.a.ai || pick.a.desc;
+        if (d) { ps.addSpacer(3); txt(ps, d, Font.systemFont(13), "ink2", 3); }
+      }
+    } else txt(w, "You're all caught up.", Font.systemFont(13), "ink2");
+    if (large) {
+      const more = unread.filter(a => !pick || a.id !== pick.a.id).slice(0, 4);
+      if (more.length) {
+        w.addSpacer(12);
+        txt(w, "Also unread", Font.semiboldSystemFont(11), "muted");
+        for (const a of more) {
+          w.addSpacer(5);
+          const r = w.addStack(); r.layoutVertically(); r.url = a.link;
+          txt(r, a.title, Font.mediumSystemFont(13), "ink", 1);
+          txt(r, srcTitle(a), Font.systemFont(10.5), "muted", 1);
+        }
+      }
+    }
+  }
+  w.addSpacer();
+  Script.setWidget(w);
+}
+
+// ---------- run ----------
+if (config.runsInWidget) {
+  await runWidget();
+} else {
+  await wv.loadHTML(buildHTML());
+  const presented = wv.present(true);
+  if (!updateChecked) { updateChecked = true; checkForUpdate().then(u => { pendingUpdate = u; offerUpdate(); }); }
+  if (sources.length) runScan().catch(e => toast(String(e.message || e)));
+  await presented;
+  saveAll();
+}
+Script.complete();
