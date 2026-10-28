@@ -99,6 +99,7 @@ Feedly is still the better pick if you mainly read on a computer, use the web or
 | ⭐ **Ratings and Picks** | Rate posts 1 to 3 stars. **Picks** surfaces unread posts like the ones you loved. |
 | 📅 **By day or by week** | Group posts the way you read them, and mark a whole day as read in one tap. |
 | 🎨 **Make it yours** | Six colour themes plus Auto (follows light and dark mode), Comfortable, Compact or Tiny layouts, four text sizes, sans or serif headlines. |
+| 🧩 **Built with** | The last section of Settings lists the [shared blueprints](https://github.com/gadominas/app-blueprints) BlogPulse follows, each linked at the exact version used (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). |
 | 🤖 **AI settings** | Claude or OpenAI, any model your key can use, a connection test, and token usage by provider, feature, model and day. |
 | ⚙️ **Every setting on screen** | Timeouts, how long to keep posts, Picks strictness, AI limits, widget timing and your invite presets. No code editing. |
 | 📲 **Widget** | A short summary of what's new and your top pick, on the Home Screen. |

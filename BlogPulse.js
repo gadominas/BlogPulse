@@ -16,12 +16,22 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
 const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;   // "Later" = 2 days
 const KC_UPDATE_SNOOZE = 'blogpulse-update-snooze';   // Keychain key, unique per app
+
+// ───────── Blueprints ─────────
+// Shared blueprints this app was built with (github.com/gadominas/app-blueprints). One line per blueprint, in this exact shape:
+// inventory tools read it without running the script, and Settings › Built with shows it.
+const BLUEPRINTS_REPO = 'https://github.com/gadominas/app-blueprints';
+const BLUEPRINTS = [
+  { id: 'in-app-updates', name: 'In-app updates', version: '1.0.0', since: '1.0.0' },
+  { id: 'settings', name: 'Settings', version: '1.0.0', since: '1.2.0' },
+  { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.0.0' },
+];
 
 // ---------- config ----------
 const APP = "BlogPulse";
@@ -767,6 +777,7 @@ function clientState() {
     },
     story: (() => { const st = stories[storyKey()]; return st ? Object.assign({}, st, { stale: st.sig !== storySig(st.scope, st.cat) }) : null; })(),
     picksReady: pk.ready, rated: pk.n, lastScan: settings.lastScan, palettes: PALETTES, version: VERSION,
+    blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO,
     catalog: CATALOG.map(c => ({ title: c[0], feed: c[1], tags: c[2] })),
   };
 }
@@ -866,6 +877,9 @@ async function handle(m) {
       catch (e) { msg = String(e.message || e); }
       return call("__done", m.req, ok, msg);
     }
+    case "openurl":   // Settings › Built with: only the blueprints repository opens from here
+      if (m.v === BLUEPRINTS_REPO || String(m.v).startsWith(BLUEPRINTS_REPO + "/")) await Safari.openInApp(m.v, false);
+      return;
     case "update-check": {
       const u = await checkForUpdate(true);
       await call("__done", m.req, true, u ? `Version ${u.latest} is available` : `You're on the latest version (${VERSION})`);
@@ -928,6 +942,13 @@ function clientApp() {
   const cfgItem = k => { for (const sec of S.cfgSchema) for (const d of sec.items) if (d.k === k) return d; return null; };
   const cfgChanged = k => { const d = cfgItem(k); return d && JSON.stringify(S.cfg[k]) !== JSON.stringify(d.def); };
   const fmtCfg = (d, v) => d.step && d.step < 1 ? Number(v).toFixed(String(d.step).split(".")[1].length) : String(v);
+  // Settings › Built with: the shared blueprints this app follows, each linked at the version it follows.
+  const bpLink = b => `${S.blueprintsRepo}/blob/${b.id}-v${b.version}/blueprints/${b.id}.md`;
+  function builtWithHTML() {
+    return `<h3 class="sec">Built with</h3><p class="hint">BlogPulse is built from shared blueprints that the other apps use too. Tap one to read how that part works.</p>
+      ${S.blueprints.map(b => `<button class="srow bp" data-act="openurl" data-v="${esc(bpLink(b))}"><div class="grow"><b>${esc(b.name)}</b><small class="muted">Blueprint ${esc(b.version)} · since BlogPulse ${esc(b.since)}</small></div><span class="go" aria-hidden="true">›</span></button>`).join("")}
+      <button class="srow bp" data-act="openurl" data-v="${esc(S.blueprintsRepo)}"><div class="grow"><b>All blueprints</b><small class="muted">${esc(S.blueprintsRepo.replace("https://", ""))}</small></div><span class="go" aria-hidden="true">›</span></button>`;
+  }
   function renderCfg() {
     const el = $("#cfgsheet"), keepTop = el.scrollTop;
     el.classList.toggle("open", cfgOpen); lockBody();
@@ -960,6 +981,7 @@ function clientApp() {
       ${S.cfgSchema.map(sec => `<h3 class="sec">${esc(sec.title)}</h3>${sec.items.map(field).join("")}`).join("")}
       <div class="aic-btns cfg-foot"><span class="note">${changed ? changed + " setting" + (changed === 1 ? "" : "s") + " changed" : "All settings are at their original values"}</span>
         ${changed ? `<button class="sm danger ${cfgArmed ? "armed" : ""}" data-act="cfgall">${cfgArmed ? "Confirm reset" : "Reset all"}</button>` : ""}</div>
+      ${builtWithHTML()}
     </div>`;
     el.scrollTop = keepTop;
   }
@@ -1497,6 +1519,7 @@ function clientApp() {
       case "upd-now": updNow(t); break;
       case "upd-later": updLater(); break;
       case "upd-close": { const uo = document.getElementById("upd"); if (uo) uo.remove(); break; }
+      case "openurl": send("openurl", { v }); break;
       case "updcheck": {
         const um = $("#updmsg"); t.disabled = true; um.textContent = "Checking…";
         send("update-check", {}, (ok, res) => { t.disabled = false; um.textContent = res || ""; if (/available/.test(res || "")) { cfgOpen = false; renderCfg(); } });
@@ -1833,6 +1856,8 @@ html[data-font=serif] .st-sec p{font-family:var(--serif)}
 .sec{font:700 calc(17px * var(--ts))/1.2 var(--display);margin:26px 0 6px}
 .srow{display:flex;align-items:center;gap:8px;padding:11px 0;border-bottom:1px solid var(--rule)}
 .srow.paused{opacity:.55}
+button.srow.bp{width:100%;background:none;border:0;border-bottom:1px solid var(--rule);font:inherit;color:inherit;text-align:left;cursor:pointer}
+.srow .go{color:var(--muted);font-size:calc(20px * var(--ts));line-height:1;padding:0 2px}
 .grow{flex:1;min-width:0}
 .grow b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .grow small{display:block;font-size:calc(13px * var(--ts));color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
