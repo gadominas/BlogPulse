@@ -2,6 +2,22 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.2.0 (2026-10-28): Built with
+
+- 🧩 **Built with**: A new last section in Settings shows the shared blueprints BlogPulse is built from.
+- 🔗 **Read how it works**: Each blueprint opens at the exact version this release follows.
+- 🧭 **Same as the other apps**: Strava Daily Digest, Dienynas+ and Go2FGym show the same section.
+
+**Changes**
+
+- Settings › Built with: In-app updates, Settings and AI configuration, each with its version and the BlogPulse version that brought it in, plus a link to all blueprints
+- BLUEPRINTS block in the script, so the blueprints inventory can read what BlogPulse follows
+- docs/BLUEPRINTS.md lists the same blueprints with links and deviations
+
+**Fixes**
+
+- Links from Built with open only pages in the blueprints repository
+
 ## 1.1.0 (2026-10-28): Pull down to refresh
 
 - ⬇️ **Pull to refresh**: Pull the list down and hold until the ring fills to check every blog again.

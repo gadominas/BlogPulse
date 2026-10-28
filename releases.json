@@ -4,6 +4,36 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.2.0",
+      "date": "2026-10-28",
+      "title": "Built with",
+      "highlights": [
+        {
+          "icon": "🧩",
+          "title": "Built with",
+          "text": "A new last section in Settings shows the shared blueprints BlogPulse is built from."
+        },
+        {
+          "icon": "🔗",
+          "title": "Read how it works",
+          "text": "Each blueprint opens at the exact version this release follows."
+        },
+        {
+          "icon": "🧭",
+          "title": "Same as the other apps",
+          "text": "Strava Daily Digest, Dienynas+ and Go2FGym show the same section."
+        }
+      ],
+      "changes": [
+        "Settings › Built with: In-app updates, Settings and AI configuration, each with its version and the BlogPulse version that brought it in, plus a link to all blueprints",
+        "BLUEPRINTS block in the script, so the blueprints inventory can read what BlogPulse follows",
+        "docs/BLUEPRINTS.md lists the same blueprints with links and deviations"
+      ],
+      "fixes": [
+        "Links from Built with open only pages in the blueprints repository"
+      ]
+    },
+    {
       "version": "1.1.0",
       "date": "2026-10-28",
       "title": "Pull down to refresh",
