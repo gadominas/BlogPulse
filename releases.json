@@ -4,13 +4,54 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.1.0",
+      "date": "2026-10-28",
+      "title": "Pull down to refresh",
+      "highlights": [
+        {
+          "icon": "⬇️",
+          "title": "Pull to refresh",
+          "text": "Pull the list down and hold until the ring fills to check every blog again."
+        },
+        {
+          "icon": "⏱",
+          "title": "Your hold time",
+          "text": "Choose how long to hold, from instant to 5 seconds, in Settings."
+        },
+        {
+          "icon": "🛡",
+          "title": "No accidental checks",
+          "text": "Let go early and nothing happens, so a casual drag never refreshes."
+        }
+      ],
+      "changes": [
+        "Pull-to-refresh on the post list with a hold ring and status text",
+        "New setting: Settings › Checking blogs › Pull-to-refresh hold (0 to 5 seconds, default 1.5)",
+        "Pulling is ignored while a sheet is open, during a running check, and for sideways swipes",
+        "The refresh button in the header stays as before"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.0.0",
       "date": "2026-10-28",
       "title": "Your tech blogs, sorted and summarised",
       "highlights": [
-        { "icon": "🧭", "title": "Story of your blogs", "text": "The latest posts blended into one short, cited read, per topic." },
-        { "icon": "⚡", "title": "TL;DR in place", "text": "Tap TL;DR on any post to read its summary right in the list." },
-        { "icon": "🗂", "title": "Topic pages", "text": "Posts sorted into Tech, AI, Finance and more. Swipe between pages." }
+        {
+          "icon": "🧭",
+          "title": "Story of your blogs",
+          "text": "The latest posts blended into one short, cited read, per topic."
+        },
+        {
+          "icon": "⚡",
+          "title": "TL;DR in place",
+          "text": "Tap TL;DR on any post to read its summary right in the list."
+        },
+        {
+          "icon": "🗂",
+          "title": "Topic pages",
+          "text": "Posts sorted into Tech, AI, Finance and more. Swipe between pages."
+        }
       ],
       "changes": [
         "Checks every followed blog each time the app opens and marks what's new",
