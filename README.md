@@ -6,7 +6,7 @@
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.0.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.1.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![License](https://img.shields.io/badge/license-MIT-15803d)](LICENSE)
@@ -65,7 +65,7 @@ Feedly plan details are from its [pricing page](https://feedly.com/i/pro) at the
 **Easier, because there is less to do:**
 
 - **It opens on what's new.** No inbox to triage: every blog is checked the moment you open the app, and new posts are marked.
-- **Three buttons.** Settings, add blogs, refresh. Everything else is a tap on the post in front of you.
+- **Three buttons.** Settings, add blogs, refresh, and you can also pull the list down to refresh. Everything else is a tap on the post in front of you.
 - **No folders to look after.** Posts land on the right topic page by themselves.
 - **Paste any address.** Type a company name or paste a blog's home page; BlogPulse finds the feed.
 - **Skim, then decide.** Tap **TL;DR** to read the gist without leaving the list. Open the full article only when it's worth it.
@@ -90,7 +90,7 @@ Feedly is still the better pick if you mainly read on a computer, use the web or
 
 | | |
 |---|---|
-| 🔄 **Checked on open** | Every blog you follow is checked in parallel each time you open BlogPulse. New posts get a blue edge and a **New** tag. |
+| 🔄 **Checked on open** | Every blog you follow is checked in parallel each time you open BlogPulse. New posts get a blue edge and a **New** tag. Pull the list down and hold to check again, or tap refresh. |
 | 🔎 **Follow anything** | Search by name in a built-in list of engineering blogs and Feedly's public directory, or paste any blog address. The RSS or Atom feed is found for you. |
 | 🗂 **Topic pages** | Tech, AI, Finance, Health & Medicine, Science, Fashion & Style and more. Swipe left and right between them. Pin a whole blog to a topic if you like. |
 | 🧭 **Story** | The latest posts blended into one short article with a TL;DR box, "Start with these" picks, and numbered links back to every post it draws on. One per topic, for *Since last visit*, *Today* or *This week*. |
@@ -139,7 +139,7 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | Rate | Tap one, two or three stars. Tap the same star again to clear it |
 | Read the Story | Open the **Story** tab and choose *Since last visit*, *Today* or *This week* |
 | Invite someone to read | Open the TL;DR, tap **Invite to read**, add your instructions, then **Share…** |
-| Check for new posts | Tap refresh |
+| Check for new posts | Pull the list down and hold until the ring fills, or tap refresh |
 | Change anything else | Tap **Settings** |
 
 ## Updates and what's new

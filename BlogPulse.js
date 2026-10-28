@@ -16,7 +16,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -37,6 +37,7 @@ const DEFAULT_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Apple
 const CONFIG = [
   ["Checking blogs", [
     { k: "fetchTimeout", label: "Time limit per blog", help: "How long to wait for one blog before giving up", unit: "s", def: 15, min: 5, max: 60, step: 1 },
+    { k: "pullHold", label: "Pull-to-refresh hold", help: "After pulling the list down, hold this long to check for new posts; 0 checks as soon as you let go", unit: "s", def: 1.5, min: 0, max: 5, step: 0.5 },
     { k: "concurrency", label: "Blogs checked at once", help: "Higher is faster but heavier on the network", unit: "", def: 6, min: 1, max: 12, step: 1 },
     { k: "userAgent", label: "Browser identity", help: "The User-Agent sent to blogs; some sites block unknown readers", type: "text", def: DEFAULT_UA },
   ]],
@@ -1157,7 +1158,10 @@ function clientApp() {
       }
     });
   }
-  window.onProgress = (d, t) => { progress = t ? [d, t] : null; renderStatus(); };
+  window.onProgress = (d, t) => {
+    progress = t ? [d, t] : null; renderStatus();
+    if (!progress && ptr.busy) setTimeout(() => ptrReset(), 350);
+  };
   window.onDiscover = res => { results = res; searching = false; renderSheet(); };
   window.addDone = (feed, ok) => { adding.delete(feed); if (ok) added.add(feed); renderSheet(); };
   window.onInvite = (id, r) => {
@@ -1584,6 +1588,62 @@ function clientApp() {
       send("cfg", { k: d.k, v: d.type === "lines" ? e.target.value.split("\n") : e.target.value });
     }
   });
+  // pull the list down at the top, hold, and every blog is checked again
+  const PULL = 72, RING = 69.1;   // pull distance in px; ring circumference (r = 11)
+  const ptr = { on: false, y0: 0, x0: 0, dist: 0, armed: false, busy: false, timer: null };
+  const ptrEl = $("#ptr"), ptrText = $("#ptrtext"), ptrPull = $("#ptrpull"), ptrHold = $("#ptrhold");
+  const holdMs = () => Math.max(0, Number(S.cfg.pullHold == null ? 1.5 : S.cfg.pullHold)) * 1000;
+  const canPull = () => !progress && !ptr.busy && !document.body.classList.contains("locked") && window.scrollY <= 0;
+  function ptrDisarm() {
+    clearTimeout(ptr.timer); ptr.armed = false;
+    ptrHold.style.transition = "none"; ptrHold.style.strokeDashoffset = RING;
+    ptrEl.classList.remove("armed");
+  }
+  function ptrReset() {
+    ptrDisarm(); ptr.on = false; ptr.busy = false; ptr.dist = 0;
+    ptrEl.classList.remove("dragging", "busy"); ptrEl.style.height = "0px";
+  }
+  function ptrGo() {
+    ptrDisarm(); ptr.busy = true; ptr.on = false;
+    ptrEl.classList.remove("dragging"); ptrEl.classList.add("busy"); ptrEl.style.height = "56px";
+    ptrText.textContent = "Checking for new posts…";
+    send("refresh", {});
+    setTimeout(() => { if (ptr.busy && !progress) ptrReset(); }, 8000);   // never leave it hanging
+  }
+  function ptrArm() {
+    ptr.armed = true; ptrEl.classList.add("armed");
+    const ms = holdMs();
+    if (!ms) { ptrText.textContent = "Release to check for new posts"; return; }
+    ptrText.textContent = "Keep holding…";
+    void ptrHold.getBoundingClientRect();   // restart the ring from empty
+    ptrHold.style.transition = `stroke-dashoffset ${ms}ms linear`; ptrHold.style.strokeDashoffset = 0;
+    ptr.timer = setTimeout(ptrGo, ms);
+  }
+  $("#list").addEventListener("touchstart", e => {
+    if (!canPull()) return;
+    const t = e.touches[0]; Object.assign(ptr, { on: true, y0: t.clientY, x0: t.clientX, dist: 0 });
+  }, { passive: true });
+  $("#list").addEventListener("touchmove", e => {
+    if (!ptr.on || ptr.busy) return;
+    const t = e.touches[0], dy = t.clientY - ptr.y0, dx = t.clientX - ptr.x0;
+    if (dy <= 0 || window.scrollY > 0) { if (ptr.dist) ptrReset(); ptr.on = dy > 0; return; }
+    if (!ptr.dist && Math.abs(dx) > dy) { ptr.on = false; return; }   // a sideways swipe, not a pull
+    e.preventDefault();
+    ptr.dist = Math.min(150, dy * 0.55);
+    ptrEl.classList.add("dragging"); ptrEl.style.height = ptr.dist + "px";
+    ptrPull.style.strokeDashoffset = RING * (1 - Math.min(1, ptr.dist / PULL));
+    if (ptr.dist >= PULL && !ptr.armed) ptrArm();
+    else if (ptr.dist < PULL && ptr.armed) ptrDisarm();
+    if (!ptr.armed) ptrText.textContent = "Pull down to check for new posts";
+  }, { passive: false });
+  const ptrEnd = () => {
+    if (!ptr.on || ptr.busy) return;
+    if (ptr.armed && !holdMs()) return ptrGo();
+    ptrReset();   // let go before the ring filled: nothing happens
+  };
+  $("#list").addEventListener("touchend", ptrEnd, { passive: true });
+  $("#list").addEventListener("touchcancel", ptrEnd, { passive: true });
+
   // swipe left/right on the list to move between category pages
   let sx = 0, sy = 0, st0 = 0;
   $("#list").addEventListener("touchstart", e => { const t = e.touches[0]; sx = t.clientX; sy = t.clientY; st0 = Date.now(); }, { passive: true });
@@ -1805,6 +1865,18 @@ html[data-font=serif] .st-sec p{font-family:var(--serif)}
 .tli-act{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
 .tli-act .hide{margin-left:auto;color:var(--muted);font-weight:600;font-size:calc(13.5px * var(--ts));padding:6px 2px}
 .tli-load{display:flex;align-items:center;gap:10px;color:var(--ink-2);font-size:calc(14px * var(--ts))}
+#ptr{height:0;overflow:hidden;display:flex;align-items:flex-end;justify-content:center;transition:height .25s ease}
+#ptr.dragging{transition:none}
+.ptr-in{display:flex;align-items:center;gap:10px;padding:0 0 16px;color:var(--ink-2);font-size:calc(14px * var(--ts));font-weight:600}
+.ptr-ring{width:26px;height:26px;transform:rotate(-90deg)}
+.ptr-ring circle{fill:none;stroke-width:3;stroke-linecap:round;stroke-dasharray:69.1;stroke-dashoffset:69.1}
+.ptr-ring .trk{stroke:var(--rule);stroke-dashoffset:0}
+.ptr-ring .pull{stroke:var(--muted)}
+.ptr-ring .hold{stroke:var(--signal)}
+#ptr.armed .ptr-in{color:var(--signal)}
+#ptr .spin-dot{display:none}
+#ptr.busy .spin-dot{display:block}
+#ptr.busy .ptr-ring{display:none}
 .spin-dot{width:15px;height:15px;flex:none;border-radius:50%;border:2px solid var(--rule);border-top-color:var(--signal);animation:spin .8s linear infinite}
 .readbtn{margin-left:auto}
 .acts{margin-left:auto;display:flex;align-items:center;gap:6px}
@@ -1922,7 +1994,7 @@ textarea.cfgin.wide{resize:vertical}
 .st-row{align-items:flex-start}
 .st-open{flex:1;min-width:0;display:block}
 .st-row .tlbtn{flex:none;margin-top:2px}
-@media (prefers-reduced-motion: reduce){.updp{animation:none}.spin-dot{animation-duration:2.4s}.tlbtn,.tlbtn .chev{transition:none}#top.busy .spin svg,.ln{animation:none}.sheet,#toast,#bar{transition:none}}
+@media (prefers-reduced-motion: reduce){#ptr{transition:none}.updp{animation:none}.spin-dot{animation-duration:2.4s}.tlbtn,.tlbtn .chev{transition:none}#top.busy .spin svg,.ln{animation:none}.sheet,#toast,#bar{transition:none}}
 `;
 
 const REFRESH_SVG = `<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>`;
@@ -1944,6 +2016,9 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
   <div class="sub"><div id="chips" class="chips"></div><div id="grp" class="seg"></div></div>
   <div class="prog"><div id="bar"></div></div>
 </header>
+<div id="ptr" aria-live="polite"><div class="ptr-in">
+  <svg class="ptr-ring" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="11" class="trk"/><circle id="ptrpull" cx="14" cy="14" r="11" class="pull"/><circle id="ptrhold" cx="14" cy="14" r="11" class="hold"/></svg>
+  <span class="spin-dot"></span><span id="ptrtext">Pull down to check for new posts</span></div></div>
 <main id="list"></main>
 <p class="ver">BlogPulse v${VERSION}</p>
 <div id="sheet" class="sheet" aria-label="Manage blogs">
