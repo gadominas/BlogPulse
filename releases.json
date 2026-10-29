@@ -4,6 +4,35 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.5.0",
+      "date": "2026-10-29",
+      "title": "Updates you won't miss",
+      "highlights": [
+        {
+          "icon": "🔔",
+          "title": "Offered every time",
+          "text": "A new version is offered each time you open BlogPulse until you install it."
+        },
+        {
+          "icon": "👆",
+          "title": "No accidental snooze",
+          "text": "Later, or a tap outside the sheet, no longer hides updates for two days."
+        },
+        {
+          "icon": "🧹",
+          "title": "Old snooze cleared",
+          "text": "A two-day Later left by an older version is removed when BlogPulse starts."
+        }
+      ],
+      "changes": [
+        "Later hides the update offer only until BlogPulse is opened again",
+        "Settings › Updates explains when updates are checked"
+      ],
+      "fixes": [
+        "Tapping outside the update sheet could hide updates for two days without pressing Later"
+      ]
+    },
+    {
       "version": "1.4.0",
       "date": "2026-10-29",
       "title": "Natural AI voices",

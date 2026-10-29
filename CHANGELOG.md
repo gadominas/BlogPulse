@@ -2,6 +2,21 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.5.0 (2026-10-29): Updates you won't miss
+
+- 🔔 **Offered every time**: A new version is offered each time you open BlogPulse until you install it.
+- 👆 **No accidental snooze**: Later, or a tap outside the sheet, no longer hides updates for two days.
+- 🧹 **Old snooze cleared**: A two-day Later left by an older version is removed when BlogPulse starts.
+
+**Changes**
+
+- Later hides the update offer only until BlogPulse is opened again
+- Settings › Updates explains when updates are checked
+
+**Fixes**
+
+- Tapping outside the update sheet could hide updates for two days without pressing Later
+
 ## 1.4.0 (2026-10-29): Natural AI voices
 
 - ✦ **AI voice**: Have your news and the Story read by OpenAI's natural-sounding voices.
