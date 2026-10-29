@@ -2,6 +2,19 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.6.0 (2026-10-29): Scan. Read. Rate.
+
+- 📈 **A logo of its own**: The pulse feed: a heartbeat through your reading list, a violet dot and a teal new-post line.
+- 🎬 **Launch screen**: The pulse draws itself and the tagline appears for about 2 seconds; tap to skip.
+- ✨ **Branded everywhere**: The logo sits in the header, on the first-run screen and in the README.
+
+**Changes**
+
+- New BlogPulse logo (pulse feed): docs/logo.svg and a 1024 px app icon, docs/icon-1024.png
+- Launch screen shown for 2.4 s with a short animation and the tagline "Scan. Read. Rate."; tap to skip; still with Reduce Motion (shared launch-screen blueprint 1.0.0)
+- Logo mark in the header, the logo on the "Follow your first blog" screen, and at the top of the README
+- Settings › Built with lists the launch-screen blueprint
+
 ## 1.5.0 (2026-10-29): Updates you won't miss
 
 - 🔔 **Offered every time**: A new version is offered each time you open BlogPulse until you install it.

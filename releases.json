@@ -4,6 +4,35 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.6.0",
+      "date": "2026-10-29",
+      "title": "Scan. Read. Rate.",
+      "highlights": [
+        {
+          "icon": "📈",
+          "title": "A logo of its own",
+          "text": "The pulse feed: a heartbeat through your reading list, a violet dot and a teal new-post line."
+        },
+        {
+          "icon": "🎬",
+          "title": "Launch screen",
+          "text": "The pulse draws itself and the tagline appears for about 2 seconds; tap to skip."
+        },
+        {
+          "icon": "✨",
+          "title": "Branded everywhere",
+          "text": "The logo sits in the header, on the first-run screen and in the README."
+        }
+      ],
+      "changes": [
+        "New BlogPulse logo (pulse feed): docs/logo.svg and a 1024 px app icon, docs/icon-1024.png",
+        "Launch screen shown for 2.4 s with a short animation and the tagline \"Scan. Read. Rate.\"; tap to skip; still with Reduce Motion (shared launch-screen blueprint 1.0.0)",
+        "Logo mark in the header, the logo on the \"Follow your first blog\" screen, and at the top of the README",
+        "Settings › Built with lists the launch-screen blueprint"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.5.0",
       "date": "2026-10-29",
       "title": "Updates you won't miss",
