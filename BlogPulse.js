@@ -16,7 +16,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -310,6 +310,7 @@ for (const k of Object.keys(stories)) if (!k.includes("|")) delete stories[k];
 const settings = Object.assign(
   { groupBy: "day", view: "unread", readOnOpen: false, ai: true, aiProvider: "anthropic", lastSession: 0, lastScan: 0,
     checkUpdates: true,   // offer new versions from GitHub (asks again 2 days after "Later")
+    speechEngine: "device", ttsModel: "gpt-4o-mini-tts", ttsVoice: "coral", ttsInstructions: "",   // read aloud: iPhone voices or OpenAI
     theme: "auto", density: "comfortable", font: "sans", textSize: 1, storyScope: "new" },
   await load("settings", {})
 );
@@ -480,10 +481,10 @@ const maskKey = k => k ? (k.length > 14 ? k.slice(0, 7) + "…" + k.slice(-4) : 
 // token usage, kept per provider, model, feature and day
 let usage = await load("usage", { since: Date.now(), p: {} });
 const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-function recordUsage(provider, model, feature, tin, tout) {
+function recordUsage(provider, model, feature, tin, tout, chars = 0) {   // chars: text sent for speech
   const P = usage.p[provider] = usage.p[provider] || { calls: 0, in: 0, out: 0, models: {}, features: {}, days: {} };
   const b = (o, k) => o[k] = o[k] || { calls: 0, in: 0, out: 0 };
-  for (const x of [P, b(P.models, model), b(P.features, feature), b(P.days, dayKey())]) { x.calls++; x.in += tin; x.out += tout; }
+  for (const x of [P, b(P.models, model), b(P.features, feature), b(P.days, dayKey())]) { x.calls++; x.in += tin; x.out += tout; if (chars) x.chars = (x.chars || 0) + chars; }
   const days = Object.keys(P.days).sort();
   while (days.length > 400) delete P.days[days.shift()];
   write("usage", usage);
@@ -498,6 +499,9 @@ async function fetchModels(p) {
   const j = await r.loadJSON();
   if (j.error) throw new Error(j.error.message || "Couldn't load models");
   let list = (j.data || []).map(m => ({ id: m.id, name: m.display_name || m.id, t: m.created_at ? Date.parse(m.created_at) : (m.created || 0) * 1000 }));
+  if (p === "openai") {   // speech models get their own list, for Settings › Listening
+    settings.ttsModels = { at: Date.now(), list: list.filter(m => /tts/.test(m.id)).sort((a, b) => b.t - a.t).map(m => ({ id: m.id, name: m.id })) };
+  }
   if (p === "openai") list = list.filter(m => /^(gpt-|o\d|chatgpt-)/.test(m.id) && !/(audio|realtime|tts|transcribe|image|search|embedding|instruct|moderation)/.test(m.id));
   list.sort((a, b) => b.t - a.t);
   settings.models = settings.models || {};
@@ -680,6 +684,33 @@ ${t.lead ? "TL;DR: " + t.lead + "\n" : ""}${t.points && t.points.length ? "Key p
   return { kind: "ai", provider: settings.aiProvider, text: msg + "\n\n" + a.link };
 }
 
+// ---------- AI voice: OpenAI's speech endpoint (Claude's API has no speech output) ----------
+const TTS_LEGACY_VOICES = ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"];   // all tts-1 and tts-1-hd can use
+async function aiSpeech(text) {
+  const key = keyFor("openai");
+  if (!key) throw new Error("AI voices need an OpenAI key");
+  const model = settings.ttsModel || "gpt-4o-mini-tts", legacy = /^tts-1/.test(model);
+  let voice = settings.ttsVoice || "coral";
+  if (legacy && !TTS_LEGACY_VOICES.includes(voice)) voice = "coral";
+  const body = { model, voice, input: String(text).slice(0, 4096), response_format: "mp3" };
+  if (!legacy && settings.ttsInstructions) body.instructions = String(settings.ttsInstructions).slice(0, 500);
+  const speed = Number(settings.voiceRate) || 1;
+  if (speed !== 1) body.speed = speed;
+  const r = new Request("https://api.openai.com/v1/audio/speech");
+  r.method = "POST"; r.timeoutInterval = 60;
+  r.headers = { "Authorization": "Bearer " + key, "Content-Type": "application/json" };
+  r.body = JSON.stringify(body);
+  const data = await r.load();
+  const code = r.response && r.response.statusCode;
+  if (code !== 200) {
+    let msg = `HTTP ${code}`;
+    try { msg = JSON.parse(data.toRawString()).error.message || msg; } catch (e) {}
+    throw new Error(msg);
+  }
+  recordUsage("openai", model, "speech", 0, 0, body.input.length);
+  return data.toBase64String();
+}
+
 // ---------- in-app updates (pattern from StravaFeed) ----------
 // Compares "1.10.0" and "1.9.2" as numbers: returns 1, 0 or -1.
 function cmpVer(a, b) {
@@ -774,10 +805,13 @@ function clientState() {
     settings: {
       groupBy: settings.groupBy, view: settings.view, readOnOpen: settings.readOnOpen, ai: settings.ai, aiProvider: settings.aiProvider, hasKey: !!aiKey(), checkUpdates: settings.checkUpdates !== false,
       voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1, voiceGender: settings.voiceGender || "all",
+      speechEngine: settings.speechEngine || "device", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"),
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize, storyScope: settings.storyScope, category: settings.category || "all", inviteInstr: settings.inviteInstr || "",
     },
     story: (() => { const st = stories[storyKey()]; return st ? Object.assign({}, st, { stale: st.sig !== storySig(st.scope, st.cat) }) : null; })(),
     picksReady: pk.ready, rated: pk.n, lastScan: settings.lastScan, palettes: PALETTES, version: VERSION,
+    ttsModels: settings.ttsModels || null,
     blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO,
     catalog: CATALOG.map(c => ({ title: c[0], feed: c[1], tags: c[2] })),
   };
@@ -829,7 +863,7 @@ async function handle(m) {
       { const pk = computePicks(Object.values(articles), cfg("picksMinRatings"), cfg("picksThreshold")); call("onPicks", pk); } break;
     case "markAll": for (const id of m.ids || []) if (articles[id]) articles[id].read = 1; break;
     case "open": if (a && a.link) { if (settings.readOnOpen) a.read = 1; saveAll(); await Safari.openInApp(a.link, false); } return;
-    case "set": if (["groupBy", "view", "readOnOpen", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates", "voiceURI", "voiceRate", "voicePitch", "voiceGender"].includes(m.k)) settings[m.k] = m.v; break;
+    case "set": if (["groupBy", "view", "readOnOpen", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "speechEngine", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v; break;
     case "refresh": return runScan();
     case "discover": {
       let res = [];
@@ -881,6 +915,10 @@ async function handle(m) {
       } catch (e) { res = excerpt ? { paras: [excerpt], partial: true } : { error: "This article couldn't be loaded" }; }
       return call("onArticleText", a.id, res);
     }
+    case "state": return push();
+    case "ttsaudio":   // one piece of AI speech, returned to the page as base64 MP3
+      try { return call("__done", m.req, true, await aiSpeech(m.text)); }
+      catch (e) { return call("__done", m.req, false, String(e.message || e)); }
     case "speak": if (m.text) Speech.speak(String(m.text).slice(0, 8000)); return;   // fallback when the page can't speak
     case "update-later": snoozeUpdate(); pendingUpdate = null; return;
     case "update-now": {
@@ -961,7 +999,28 @@ function clientApp() {
       ${S.blueprints.map(b => `<button class="srow bp" data-act="openurl" data-v="${esc(bpLink(b))}"><div class="grow"><b>${esc(b.name)}</b><small class="muted">Blueprint ${esc(b.version)} · since BlogPulse ${esc(b.since)}</small></div><span class="go" aria-hidden="true">›</span></button>`).join("")}
       <button class="srow bp" data-act="openurl" data-v="${esc(S.blueprintsRepo)}"><div class="grow"><b>All blueprints</b><small class="muted">${esc(S.blueprintsRepo.replace("https://", ""))}</small></div><span class="go" aria-hidden="true">›</span></button>`;
   }
+  const vseg = (k, opts) => `<div class="seg wide">${opts.map(([v, l]) => `<button class="${String(S.settings[k]) === String(v) ? "on" : ""}" data-act="voiceset" data-k="${k}" data-v="${v}">${l}</button>`).join("")}</div>`;
   function listenHTML() {
+    const eng = S.settings.speechEngine === "ai" ? "ai" : "device";
+    return `<div class="lk-row"><span class="lk-l">Voice engine</span>${vseg("speechEngine", [["device", "iPhone voice"], ["ai", "✦ AI voice"]])}</div>` + (eng === "ai" ? aiListenHTML() : deviceListenHTML());
+  }
+  function aiListenHTML() {
+    if (!S.settings.hasOpenAI) return `<p class="note">AI voices come from OpenAI, so they need an OpenAI key, even when Claude writes your summaries (Claude's API doesn't offer speech).</p>
+      <div class="aic-btns"><button class="sm primary" data-act="aiopen">Add an OpenAI key</button></div>`;
+    const model = S.settings.ttsModel || "gpt-4o-mini-tts", legacy = /^tts-1/.test(model), g = S.settings.voiceGender || "all";
+    const vs = OAI_VOICES.filter(([v, gg]) => (!legacy || LEGACY_TTS.has(v)) && (g === "all" || gg === g || v === S.settings.ttsVoice));
+    const loaded = ((S.ttsModels || {}).list || []).map(m => m.id);
+    const mlist = [model].concat(loaded.length ? loaded : ["gpt-4o-mini-tts", "tts-1-hd", "tts-1"]).filter((x, i, a) => a.indexOf(x) === i);
+    const gl = { f: " (female)", m: " (male)", n: " (neutral)" };
+    return `<div class="lk-row"><span class="lk-l">Voice</span>${vseg("voiceGender", [["all", "All"], ["f", "Female"], ["m", "Male"]])}
+        <select class="ttsvoicesel voicesel" aria-label="AI voice">${vs.map(([v, gg]) => `<option value="${v}" ${v === S.settings.ttsVoice ? "selected" : ""}>${v[0].toUpperCase() + v.slice(1)}${gl[gg]}</option>`).join("")}</select></div>
+      <div class="lk-row"><span class="lk-l">Speech model</span><select class="ttsmodelsel voicesel" aria-label="Speech model">${mlist.map(m => `<option value="${esc(m)}" ${m === model ? "selected" : ""}>${esc(m)}</option>`).join("")}</select></div>
+      ${legacy ? "" : `<div class="lk-row"><span class="lk-l">How it should sound</span><textarea class="ttsinstr cfgin wide" rows="2" placeholder="e.g. Calm, clear newsreader. Neutral accent.">${esc(S.settings.ttsInstructions || "")}</textarea></div>`}
+      <div class="lk-row"><span class="lk-l">Speed</span>${vseg("voiceRate", [[0.85, "Slow"], [1, "Normal"], [1.15, "Fast"], [1.3, "Faster"]])}</div>
+      <div class="aic-btns"><button class="sm" data-act="voicetest">${SPK}Test the voice</button></div>
+      <p class="note">✦ Spoken by OpenAI with your key, one post or section at a time; the first piece takes a few seconds. OpenAI bills each use; BlogPulse counts the characters under AI settings › Token usage as “Read aloud”. Voice labels describe how each voice usually sounds.${loaded.length ? "" : " Load your OpenAI models in AI settings to see every speech model your key can use."}</p>`;
+  }
+  function deviceListenHTML() {
     if (!SYN || !voices.length) return `<p class="note">This device reads aloud with the system voice. Choose it in iOS Settings › Accessibility › Spoken Content.</p>`;
     const g = S.settings.voiceGender || "all", cur = currentVoice();
     const shown = voices.filter(v => g === "all" || genderOf(v) === g || v === cur);
@@ -1018,7 +1077,7 @@ function clientApp() {
   }
   let aiOpen = false, aiArmed = null; const aiLoading = new Set();
   const PN = { anthropic: "Claude", openai: "OpenAI" };
-  const FEAT = { summaries: "Summaries and categories", story: "Story", tldr: "TL;DR", invite: "Invites", test: "Connection tests", other: "Other" };
+  const FEAT = { summaries: "Summaries and categories", story: "Story", tldr: "TL;DR", invite: "Invites", test: "Connection tests", speech: "Read aloud", other: "Other" };
   const fmtN = n => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e4 ? Math.round(n / 1e3) + "k" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
   function arm(key) { aiArmed = key; renderAI(); setTimeout(() => { if (aiArmed === key) { aiArmed = null; renderAI(); } }, 3500); }
   function usageBlock(p, P) {
@@ -1029,10 +1088,10 @@ function clientApp() {
     const month = S.ai.today.slice(0, 7);
     const monthTot = Object.entries(P.days).filter(([k]) => k.startsWith(month)).reduce((n, [, x]) => n + x.in + x.out, 0);
     const rows = (obj, label) => Object.entries(obj).sort((x, y) => (y[1].in + y[1].out) - (x[1].in + x[1].out))
-      .map(([k, x]) => `<tr><td>${esc(label(k))}</td><td>${x.calls}</td><td>${fmtN(x.in)}</td><td>${fmtN(x.out)}</td></tr>`).join("");
+      .map(([k, x]) => `<tr><td>${esc(label(k))}</td><td>${x.calls}</td>${x.chars && !x.in ? `<td>${fmtN(x.chars)} chars</td><td>—</td>` : `<td>${fmtN(x.in)}</td><td>${fmtN(x.out)}</td>`}</tr>`).join("");
     return `<div class="ucard"><div class="aic-h"><b>${PN[p]}</b><span class="muted small">${P.calls} request${P.calls === 1 ? "" : "s"}</span></div>
       <div class="ustat"><div><b>${fmtN(P.in + P.out)}</b><small>total tokens</small></div><div><b>${fmtN(P.in)}</b><small>input</small></div><div><b>${fmtN(P.out)}</b><small>output</small></div></div>
-      <p class="note">Today ${fmtN(tot(S.ai.today))} tokens — this month ${fmtN(monthTot)} tokens</p>
+      <p class="note">Today ${fmtN(tot(S.ai.today))} tokens — this month ${fmtN(monthTot)} tokens${P.chars ? ` — read aloud ${fmtN(P.chars)} characters` : ""}</p>
       <div class="ubars" aria-label="Tokens per day, last 14 days">${days.map(k => `<span style="height:${Math.max(tot(k) ? 6 : 2, tot(k) / max * 100)}%" class="${tot(k) ? "" : "zero"}" title="${k}: ${tot(k)} tokens"></span>`).join("")}</div>
       <div class="ubars-l"><span>2 weeks ago</span><span>Today</span></div>
       <table class="utab"><tr><th>Feature</th><th>Requests</th><th>In</th><th>Out</th></tr>${rows(P.features, k => FEAT[k] || k)}</table>
@@ -1260,21 +1319,74 @@ function clientApp() {
     }
     return out;
   }
-  const tts = { parts: [], i: 0, label: "", items: [], token: 0, paused: false, on: false, timer: null };
+  const tts = { parts: [], i: 0, label: "", items: [], token: 0, paused: false, on: false, timer: null, engine: "device", loading: false };
+  // AI voice: OpenAI speech, played through one <audio> element that a tap unlocks first
+  const OAI_VOICES = [["alloy", "n"], ["ash", "m"], ["ballad", "m"], ["coral", "f"], ["echo", "m"], ["fable", "m"], ["nova", "f"], ["onyx", "m"], ["sage", "f"], ["shimmer", "f"], ["verse", "m"], ["marin", "f"], ["cedar", "m"]];
+  const LEGACY_TTS = new Set(["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]);
+  const aiTTS = () => S.settings.speechEngine === "ai" && S.settings.hasOpenAI;
+  const au = new Audio(); au.preload = "auto"; au.setAttribute("playsinline", "");
+  const SILENT = (() => {   // 0.1 s of silence as a WAV, to unlock audio inside the tap
+    const n = 800, buf = new Uint8Array(44 + n), dv = new DataView(buf.buffer);
+    const w = (o, t) => { for (let i = 0; i < t.length; i++) buf[o + i] = t.charCodeAt(i); };
+    w(0, "RIFF"); dv.setUint32(4, 36 + n, true); w(8, "WAVE"); w(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+    dv.setUint32(24, 8000, true); dv.setUint32(28, 8000, true); dv.setUint16(32, 1, true); dv.setUint16(34, 8, true); w(36, "data"); dv.setUint32(40, n, true); buf.fill(128, 44);
+    let str = ""; buf.forEach(b => { str += String.fromCharCode(b); }); return "data:audio/wav;base64," + btoa(str);
+  })();
+  function unlockAudio() { try { au.src = SILENT; const p = au.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+  function aiChunks(t) {   // split at sentences: a short first piece so audio starts quickly, then up to ~2,000 characters
+    const out = []; let cur = "";
+    for (const sen of clean(t).match(/[^.!?…]+[.!?…]+["”’)]*\s*|[^.!?…]+$/g) || []) {
+      if (cur && (cur + sen).length > (out.length ? 2000 : 700)) { out.push(cur.trim()); cur = ""; }
+      cur += sen;
+    }
+    if (cur.trim()) out.push(cur.trim());
+    return out;
+  }
+  function aiFetch(part) {
+    if (part.audio) return Promise.resolve(part.audio);
+    if (!part.pending) part.pending = new Promise((res, rej) => send("ttsaudio", { text: part.t }, (ok, msg) => ok ? res(part.audio = msg) : rej(msg)));
+    return part.pending;
+  }
+  function aiPlayPart() {
+    const my = ++tts.token, part = tts.parts[tts.i];
+    if (!part) return stopSpeaking();
+    tts.loading = !part.audio; renderPlayer();
+    aiFetch(part).then(b64 => {
+      if (my !== tts.token) return;
+      tts.loading = false;
+      au.onended = () => { if (my !== tts.token) return; part.audio = null; tts.i++; aiPlayPart(); };
+      au.src = "data:audio/mpeg;base64," + b64;
+      if (!tts.paused) {
+        const pr = au.play();
+        if (pr && pr.catch) pr.catch(() => { if (my === tts.token) { tts.paused = true; renderPlayer(); toast("Tap play to start the AI voice"); } });
+      }
+      renderPlayer();
+      const nx = tts.parts[tts.i + 1]; if (nx) aiFetch(nx).catch(() => {});   // the next piece is ready before this one ends
+    }).catch(err => {
+      if (my !== tts.token) return;
+      const rest = tts.items.slice(part.k), label = tts.label;
+      toast(`AI voice failed: ${String(err || "").slice(0, 70)}. Using the iPhone voice.`);
+      if (SYN && voices.length) speak(label, rest, "device"); else stopSpeaking();
+    });
+  }
   const playSoon = () => { clearTimeout(tts.timer); tts.timer = setTimeout(playPart, 60); };   // iOS needs a beat after cancel()
-  function speak(label, items) {
-    if (!SYN || !voices.length) {   // no Web Speech: hand the text to Scriptable's system voice
+  function speak(label, items, engine) {
+    const ai = engine ? engine === "ai" : aiTTS();
+    if (!ai && (!SYN || !voices.length)) {   // no Web Speech: hand the text to Scriptable's system voice
       send("speak", { text: items.map(x => clean(x.text)).join(" ") });
       return toast("Reading aloud with the system voice");
     }
     stopSpeaking(true);
+    if (ai) unlockAudio();   // has to happen inside the tap, before any waiting
+    tts.engine = ai ? "ai" : "device";
     tts.items = items; tts.label = label; tts.i = 0; tts.paused = false; tts.on = true;
     tts.parts = [];
-    items.forEach((it, k) => chunks(it.text).forEach(t => tts.parts.push({ t, k })));
+    items.forEach((it, k) => (ai ? aiChunks : chunks)(it.text).forEach(t => tts.parts.push({ t, k })));
     if (!tts.parts.length) return stopSpeaking();
     playSoon();
   }
   function playPart() {
+    if (tts.engine === "ai") return aiPlayPart();
     const my = ++tts.token, part = tts.parts[tts.i];
     if (!part) return stopSpeaking();
     const u = new SpeechSynthesisUtterance(part.t), v = currentVoice();
@@ -1285,20 +1397,25 @@ function clientApp() {
     SYN.speak(u); renderPlayer();
   }
   function stopSpeaking(quiet) {
-    tts.token++; tts.on = false; tts.paused = false; clearTimeout(tts.timer);
+    tts.token++; tts.on = false; tts.paused = false; tts.loading = false; clearTimeout(tts.timer);
+    au.onended = null; try { au.pause(); } catch (e) {}
     if (SYN) SYN.cancel();
     if (!quiet) renderPlayer();
   }
   function togglePause() {
     if (!tts.on) return;
-    if (tts.paused) { SYN.resume(); tts.paused = false; } else { SYN.pause(); tts.paused = true; }
+    if (tts.engine === "ai") {
+      if (tts.paused) { tts.paused = false; if (!tts.loading) { const pr = au.play(); if (pr && pr.catch) pr.catch(() => {}); } }
+      else { tts.paused = true; au.pause(); }
+    } else if (tts.paused) { SYN.resume(); tts.paused = false; } else { SYN.pause(); tts.paused = true; }
     renderPlayer();
   }
   function skipItem() {
     if (!tts.on) return;
     const k = (tts.parts[tts.i] || {}).k, j = tts.parts.findIndex((p, n) => n > tts.i && p.k !== k);
     if (j < 0) return stopSpeaking();
-    tts.token++; SYN.cancel(); tts.i = j; tts.paused = false; playSoon();
+    tts.token++; if (tts.engine === "ai") { au.onended = null; au.pause(); } else SYN.cancel();
+    tts.i = j; tts.paused = false; playSoon();
   }
   function renderPlayer() {
     const pl = $("#player"), on = tts.on;
@@ -1307,7 +1424,8 @@ function clientApp() {
     if (!on) return;
     const part = tts.parts[tts.i] || {}, it = tts.items[part.k] || {};
     $("#plTitle").textContent = it.title || tts.label;
-    $("#plSub").textContent = tts.label + (tts.items.length > 1 ? ` — ${part.k + 1} of ${tts.items.length}` : "") + (tts.paused ? " — paused" : "");
+    $("#plSub").textContent = (tts.engine === "ai" ? "✦ AI voice — " : "") + tts.label + (tts.items.length > 1 ? ` — ${part.k + 1} of ${tts.items.length}` : "")
+      + (tts.loading ? " — preparing…" : tts.paused ? " — paused" : "");
     pl.classList.toggle("paused", tts.paused);
     $("#plPause").innerHTML = tts.paused ? PLAY_ICO : PAUSE_ICO;
     $("#plPause").setAttribute("aria-label", tts.paused ? "Resume" : "Pause");
@@ -1658,7 +1776,8 @@ function clientApp() {
       case "plnext": skipItem(); break;
       case "plstop": stopSpeaking(); break;
       case "voiceset": {
-        const k = t.dataset.k, val = k === "voiceGender" ? v : +v;
+        const k = t.dataset.k, val = k === "voiceGender" || k === "speechEngine" ? v : +v;
+        if (k === "speechEngine" && tts.on) stopSpeaking();
         S.settings[k] = val; send("set", { k, v: val }); renderCfg(); break;
       }
       case "voicetest": speak("Voice test", [{ title: "Voice test", text: "Hello! This is how BlogPulse will read your news and stories to you." }]); break;
@@ -1734,7 +1853,7 @@ function clientApp() {
         break;
       case "pause": send("pause", { id }); break;
       case "toggle": S.settings[v] = !S.settings[v]; send("set", { k: v, v: S.settings[v] }); renderCfg(); renderAI(); break;
-      case "aiopen": aiOpen = true; renderAI(); break;
+      case "aiopen": aiOpen = true; renderAI(); send("state", {}); break;   // fresh token counts
       case "cfgopen": cfgOpen = true; renderCfg(); break;
       case "cfgclose": cfgOpen = false; cfgArmed = false; renderCfg(); renderSheet(); break;
       case "cfgreset": { const d = cfgItem(t.dataset.k); S.cfg[d.k] = d.def; send("cfg", { k: d.k, v: null }); renderCfg(); break; }
@@ -1762,9 +1881,12 @@ function clientApp() {
   document.addEventListener("touchmove", e => { if (e.touches.length > 1 || (e.scale && e.scale !== 1)) e.preventDefault(); }, { passive: false });
   document.addEventListener("change", e => {
     if (e.target.classList && e.target.classList.contains("catsel")) send("srccat", { id: e.target.dataset.id, v: e.target.value });
+    if (e.target.classList && e.target.classList.contains("ttsvoicesel")) { S.settings.ttsVoice = e.target.value; send("set", { k: "ttsVoice", v: e.target.value }); return; }
+    if (e.target.classList && e.target.classList.contains("ttsmodelsel")) { S.settings.ttsModel = e.target.value; send("set", { k: "ttsModel", v: e.target.value }); renderCfg(); return; }
+    if (e.target.classList && e.target.classList.contains("ttsinstr")) { S.settings.ttsInstructions = e.target.value.trim(); send("set", { k: "ttsInstructions", v: S.settings.ttsInstructions }); return; }
     if (e.target.classList && e.target.classList.contains("voicesel")) {
       S.settings.voiceURI = e.target.value; send("set", { k: "voiceURI", v: e.target.value });
-      if (tts.on) { tts.token++; SYN.cancel(); playSoon(); }   // switch voice mid-sentence
+      if (tts.on && tts.engine === "device") { tts.token++; SYN.cancel(); playSoon(); }   // switch voice mid-sentence
     }
     if (e.target.classList && e.target.classList.contains("modelsel")) send("aimodel", { p: e.target.dataset.p, v: e.target.value });
     if (e.target.classList && e.target.classList.contains("cfgin")) {
