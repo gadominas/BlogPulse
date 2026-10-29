@@ -12,11 +12,14 @@
  *  - Optional Claude or OpenAI: summaries, categories, the Story, TL;DRs and invites to read
  *  - Home-screen widget, in-app updates from GitHub
  *
+ *  - Opens on a 2.4 s launch screen with the BlogPulse logo (app-blueprints · launch-screen)
+ *  - The BLUEPRINTS block below lists every shared blueprint this app follows (Settings › Built with)
+ *
  * Data lives in iCloud Drive › Scriptable › BlogPulse (JSON files). Keys live in the iOS Keychain.
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -32,6 +35,7 @@ const BLUEPRINTS = [
   { id: 'in-app-updates', name: 'In-app updates', version: '1.0.0', since: '1.0.0' },
   { id: 'settings', name: 'Settings', version: '1.0.0', since: '1.2.0' },
   { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.0.0' },
+  { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.6.0' },
 ];
 
 // ---------- config ----------
@@ -1150,7 +1154,7 @@ function clientApp() {
   function inlineTldr(a) {
     if (!expanded.has(a.id)) return "";
     const d = tl[a.id];
-    if (!d || d === "loading") return `<div class="tli"><div class="tli-load" role="status"><span class="spin-dot"></span>${S.settings.hasKey ? "Reading and summarising the article…" : "Reading the article…"}</div></div>`;
+    if (!d || d === "loading") return `<div class="tli"><div class="tli-load" role="status"><span class="busy-dot"></span>${S.settings.hasKey ? "Reading and summarising the article…" : "Reading the article…"}</div></div>`;
     if (d.error) return `<div class="tli"><p class="err">${esc(d.error)}.</p><div class="tli-act"><button class="sm" data-act="tldrretry" data-id="${a.id}">Try again</button><button class="hide" data-act="tldr" data-id="${a.id}">Hide</button></div></div>`;
     return `<div class="tli">
       <div class="tli-top">${d.kind === "ai" ? `<span class="badge-ai">✦ AI summary by ${d.provider === "openai" ? "OpenAI" : "Claude"}</span>` : `<span class="badge-ex">Extracted — no AI</span>`}${d.mins ? `<span>${d.mins} min read</span>` : ""}</div>
@@ -1573,7 +1577,7 @@ function clientApp() {
     </article>`;
   }
   function emptyState() {
-    if (!S.sources.length) return `<div class="empty"><h2>Follow your first blog</h2><p>Search for a company or paste any blog address. Every followed blog is checked each time you open the app.</p><button class="primary" data-act="sheet">Add blogs</button></div>`;
+    if (!S.sources.length) return `<div class="empty"><svg class="idleMark" viewBox="0 0 240 240" role="img" aria-label="BlogPulse logo"><path d="M52 72 H188 M136 168 H172" fill="none" stroke="#F6F7F9" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round"/><path d="M46 120 H82 L98 88 L120 152 L138 102 L150 120 H166" fill="none" stroke="#F6F7F9" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/><circle cx="186" cy="120" r="13" fill="#A78BFA"/><path d="M52 168 H116" fill="none" stroke="#2DD4BF" stroke-width="7" stroke-linecap="round"/></svg><h2>Follow your first blog</h2><p>Search for a company or paste any blog address. Every followed blog is checked each time you open the app.</p><button class="primary" data-act="sheet">Add blogs</button></div>`;
     const msg = {
       unread: ["You're all caught up", "New posts appear here after the next check."],
       new: ["Nothing new since your last visit", "Tap refresh to check again."],
@@ -2002,7 +2006,7 @@ button:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-r
 .icon{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;background:var(--sheet);border:1px solid var(--rule);font:700 15px/1 var(--display);text-align:center}
 .icon.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .icon svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-#top.busy .spin svg{animation:spin 1s linear infinite}
+#top.busy .rf-spin svg{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 .lk-row{margin-bottom:14px}
@@ -2204,10 +2208,10 @@ body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 84px)}
 .ptr-ring .pull{stroke:var(--muted)}
 .ptr-ring .hold{stroke:var(--signal)}
 #ptr.armed .ptr-in{color:var(--signal)}
-#ptr .spin-dot{display:none}
-#ptr.busy .spin-dot{display:block}
+#ptr .busy-dot{display:none}
+#ptr.busy .busy-dot{display:block}
 #ptr.busy .ptr-ring{display:none}
-.spin-dot{width:15px;height:15px;flex:none;border-radius:50%;border:2px solid var(--rule);border-top-color:var(--signal);animation:spin .8s linear infinite}
+.busy-dot{width:15px;height:15px;flex:none;border-radius:50%;border:2px solid var(--rule);border-top-color:var(--signal);animation:spin .8s linear infinite}
 .readbtn{margin-left:auto}
 .acts{margin-left:auto;display:flex;align-items:center;gap:6px}
 .acts .readbtn{margin-left:0}
@@ -2324,9 +2328,44 @@ textarea.cfgin.wide{resize:vertical}
 .st-row{align-items:flex-start}
 .st-open{flex:1;min-width:0;display:block}
 .st-row .tlbtn{flex:none;margin-top:2px}
-@media (prefers-reduced-motion: reduce){.eq i{animation:none;height:60%}#ptr{transition:none}.updp{animation:none}.spin-dot{animation-duration:2.4s}.tlbtn,.tlbtn .chev{transition:none}#top.busy .spin svg,.ln{animation:none}.sheet,#toast,#bar{transition:none}}
+/* BlogPulse logo: pulse feed (header mark, first-run screen, launch screen) */
+.brand{display:flex;align-items:center;gap:10px}
+.brand .x{color:#6D28D9}
+[data-theme=slate] .brand .x,[data-theme=night] .brand .x{color:#A78BFA}
+.brand-mark{width:calc(32px * var(--ts));height:calc(32px * var(--ts));border-radius:calc(8px * var(--ts));background:#0E1116;flex:none;box-shadow:inset 0 0 0 1px rgba(246,247,249,.14)}
+.idleMark{display:block;width:76px;height:76px;margin:0 auto 18px;border-radius:18px;background:#0E1116}
+/* Launch screen (app-blueprints · launch-screen 1.0.0) */
+.splash{--sp-bg:#0E1116;--sp-ink:#F6F7F9;--sp-accent:#A78BFA;--sp-accent2:#2DD4BF;--sp-muted:#9AA3AE;--sp-font:var(--display);
+  position:fixed;inset:0;z-index:90;background:var(--sp-bg);color:var(--sp-ink);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;cursor:pointer;
+  animation:spOut .4s ease 2.4s forwards}
+.splash.gone{display:none}
+.spIcon{width:148px;height:148px;opacity:0;transform:scale(.86);animation:spIn .5s cubic-bezier(.2,.9,.3,1.2) .05s forwards}
+.spIcon svg{width:100%;height:100%;display:block;overflow:visible}
+.spFrame{fill:none;stroke:var(--sp-ink);stroke-opacity:.35;stroke-width:7;stroke-linecap:round;stroke-linejoin:round;opacity:0;animation:spFade .4s ease .25s forwards}
+.spDraw{fill:none;stroke:var(--sp-ink);stroke-width:13;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:100;stroke-dashoffset:100;animation:spDraw .8s ease-in-out .15s forwards}
+.spPop{fill:var(--sp-accent);transform-box:fill-box;transform-origin:center;transform:scale(0);animation:spPop .45s cubic-bezier(.3,1.7,.5,1) .75s forwards}
+.spDetail{fill:var(--sp-ink);opacity:0;animation:spFade .3s ease 1.05s forwards}
+.spSweep{fill:none;stroke:var(--sp-accent2);stroke-width:7;stroke-linecap:round;opacity:0;transform:translateX(var(--sp-sweep-from,-120px));animation:spSweep 1s ease-in-out .95s forwards}
+.spWord{font:800 40px/1 var(--sp-font,ui-rounded,-apple-system,system-ui,sans-serif);letter-spacing:-.02em;opacity:0;transform:translateY(10px);animation:spUp .45s ease 1.05s forwards}
+.spWord span{color:var(--sp-accent)}
+.spTag{font:600 15px/1.3 -apple-system,system-ui,sans-serif;letter-spacing:.06em;color:var(--sp-muted);opacity:0;transform:translateY(8px);animation:spUp .45s ease 1.4s forwards}
+@keyframes spIn{to{opacity:1;transform:scale(1)}}
+@keyframes spFade{to{opacity:1}}
+@keyframes spDraw{to{stroke-dashoffset:0}}
+@keyframes spPop{to{transform:scale(1)}}
+@keyframes spSweep{0%{opacity:0}15%{opacity:1}100%{opacity:1;transform:translateX(0)}}
+@keyframes spUp{to{opacity:1;transform:none}}
+@keyframes spOut{to{opacity:0;visibility:hidden}}
+@media (prefers-reduced-motion:reduce){
+  .splash *{animation:none!important;opacity:1!important;transform:none!important;stroke-dashoffset:0!important}
+  .splash{animation:spOut .3s ease 1.6s forwards!important}
+}
+@media (prefers-reduced-motion: reduce){.eq i{animation:none;height:60%}#ptr{transition:none}.updp{animation:none}.busy-dot{animation-duration:2.4s}.tlbtn,.tlbtn .chev{transition:none}#top.busy .rf-spin svg,.ln{animation:none}.sheet,#toast,#bar{transition:none}}
 `;
 
+// BlogPulse logo (pulse feed), drawn on its dark tile: header mark and the first-run screen
+const LOGO_SVG = '<path d="M52 72 H188 M136 168 H172" fill="none" stroke="#F6F7F9" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round"/><path d="M46 120 H82 L98 88 L120 152 L138 102 L150 120 H166" fill="none" stroke="#F6F7F9" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/><circle cx="186" cy="120" r="13" fill="#A78BFA"/><path d="M52 168 H116" fill="none" stroke="#2DD4BF" stroke-width="7" stroke-linecap="round"/>';
 const REFRESH_SVG = `<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>`;
 const ADD_SVG = `<svg viewBox="0 0 24 24"><path d="M4 6h10M4 12h10M4 18h7M18 14v8M14 18h8"/></svg>`;
 const SETTINGS_SVG = `<svg viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>`;
@@ -2336,11 +2375,21 @@ const initTheme = THEME_IDS.includes(settings.theme) ? settings.theme : (Device.
 const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-font="${settings.font === "serif" ? "serif" : "sans"}" style="--ts:${+settings.textSize || 1}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <style>${CSS}</style></head><body class="d-${["compact", "tiny"].includes(settings.density) ? settings.density : "comfortable"}">
+<div class="splash" id="splash" role="img" aria-label="BlogPulse. Scan. Read. Rate.">
+  <div class="spIcon"><svg viewBox="0 0 240 240" aria-hidden="true">
+    <path class="spFrame" d="M52 72 H188 M136 168 H172"></path>
+    <path class="spDraw" pathLength="100" d="M46 120 H82 L98 88 L120 152 L138 102 L150 120 H166"></path>
+    <circle class="spPop" cx="186" cy="120" r="13"></circle>
+    <path class="spSweep" d="M52 168 H116"></path>
+  </svg></div>
+  <div class="spWord">Blog<span>Pulse</span></div>
+  <div class="spTag">Scan. Read. Rate.</div>
+</div>
 <header id="top">
-  <div class="tb"><div><h1 class="brand">BlogPulse</h1><div id="status" class="status"></div></div>
+  <div class="tb"><div><h1 class="brand"><svg class="brand-mark" viewBox="0 0 240 240" aria-hidden="true">${LOGO_SVG}</svg><span>Blog<span class="x">Pulse</span></span></h1><div id="status" class="status"></div></div>
     <div class="tb-a"><button class="icon" data-act="cfgopen" aria-label="Settings">${SETTINGS_SVG}</button>
     <button class="icon" data-act="sheet" aria-label="Add and manage blogs">${ADD_SVG}</button>
-    <button class="icon spin" data-act="refresh" aria-label="Check for new posts">${REFRESH_SVG}</button></div></div>
+    <button class="icon rf-spin" data-act="refresh" aria-label="Check for new posts">${REFRESH_SVG}</button></div></div>
   <nav id="cats" class="cats" aria-label="Categories"></nav>
   <nav id="tabs" class="tabs"></nav>
   <div class="sub"><div id="chips" class="chips"></div><div id="grp" class="seg"></div></div>
@@ -2348,7 +2397,7 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
 </header>
 <div id="ptr" aria-live="polite"><div class="ptr-in">
   <svg class="ptr-ring" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="11" class="trk"/><circle id="ptrpull" cx="14" cy="14" r="11" class="pull"/><circle id="ptrhold" cx="14" cy="14" r="11" class="hold"/></svg>
-  <span class="spin-dot"></span><span id="ptrtext">Pull down to check for new posts</span></div></div>
+  <span class="busy-dot"></span><span id="ptrtext">Pull down to check for new posts</span></div></div>
 <main id="list"></main>
 <p class="ver">BlogPulse v${VERSION}</p>
 <div id="sheet" class="sheet" aria-label="Manage blogs">
@@ -2370,7 +2419,16 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
   <button class="pl-btn" data-act="plstop" aria-label="Stop"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg></button>
 </div>
 <div id="toast" role="status"></div>
-<script>window.__INIT = ${safeJSON(clientState())};
+<script>
+// Launch screen (app-blueprints · launch-screen 1.0.0): first, self-contained
+(function () {
+  var sp = document.getElementById("splash");
+  if (!sp) return;
+  function gone() { sp.classList.add("gone"); sp.setAttribute("aria-hidden", "true"); }
+  sp.addEventListener("click", gone);   // tap to skip
+  setTimeout(gone, 2900);               // out of the page once the CSS fade is done
+})();
+window.__INIT = ${safeJSON(clientState())};
 (${clientApp.toString()})();</script>
 </body></html>`;
 

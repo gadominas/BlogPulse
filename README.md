@@ -1,19 +1,24 @@
 <div align="center">
 
+<img src="docs/logo.svg" width="112" alt="BlogPulse logo: feed lines with a heartbeat pulse ending in a violet dot, and a teal new-article line">
+
 # BlogPulse
 
-**Every tech blog you care about, checked the moment you open it.<br>Sorted by topic, summarised in seconds, ready to share.**
+**Scan. Read. Rate.**
+
+Every tech blog you care about, checked the moment you open it.<br>Sorted by topic, summarised in seconds, ready to share.
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.5.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.6.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![License](https://img.shields.io/badge/license-MIT-15803d)](LICENSE)
 
-<img src="docs/screenshots/01-unread.png" width="250" alt="Unread posts grouped by day, with topic pages, AI summaries and a TL;DR button">&nbsp;
-<img src="docs/screenshots/02-story.png" width="250" alt="The Story: an AI-written briefing of the latest posts, with a cited TL;DR">&nbsp;
-<img src="docs/screenshots/03-tldr.png" width="250" alt="A TL;DR opened right inside the list">
+<img src="docs/screenshots/01-unread.png" width="200" alt="Unread posts grouped by day, with topic pages, AI summaries and a TL;DR button">&nbsp;
+<img src="docs/screenshots/launch.png" width="200" alt="Launch screen: the BlogPulse pulse draws itself, then the tagline Scan. Read. Rate.">&nbsp;
+<img src="docs/screenshots/02-story.png" width="200" alt="The Story: an AI-written briefing of the latest posts, with a cited TL;DR">&nbsp;
+<img src="docs/screenshots/03-tldr.png" width="200" alt="A TL;DR opened right inside the list">
 
 </div>
 
@@ -100,6 +105,7 @@ Feedly is still the better pick if you mainly read on a computer, use the web or
 | ⭐ **Ratings and Picks** | Rate posts 1 to 3 stars. **Picks** surfaces unread posts like the ones you loved. |
 | 📅 **By day or by week** | Group posts the way you read them, and mark a whole day as read in one tap. |
 | 🎨 **Make it yours** | Six colour themes plus Auto (follows light and dark mode), Comfortable, Compact or Tiny layouts, four text sizes, sans or serif headlines. |
+| 🎬 **Launch screen** | BlogPulse opens on its logo for 2.4 seconds: the pulse draws itself, then "Scan. Read. Rate." Tap to skip; with Reduce Motion it appears without movement. It is the shared [launch-screen](https://github.com/gadominas/app-blueprints/blob/main/blueprints/launch-screen.md) blueprint, so all the apps start the same way. |
 | 🧩 **Built with** | The last section of Settings lists the [shared blueprints](https://github.com/gadominas/app-blueprints) BlogPulse follows, each linked at the exact version used (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). |
 | 🤖 **AI settings** | Claude or OpenAI, any model your key can use, a connection test, and token usage by provider, feature, model and day. |
 | ⚙️ **Every setting on screen** | Timeouts, how long to keep posts, Picks strictness, AI limits, widget timing and your invite presets. No code editing. |
@@ -168,6 +174,8 @@ See [CHANGELOG.md](CHANGELOG.md) for every release. Maintainers: release notes l
 ## How it works
 
 BlogPulse reads the public RSS or Atom feed each blog already publishes. When you paste a website, it looks for the feed the site advertises and then tries the usual addresses. Posts are stored on your phone, sorted into topics by AI or by keyword matching, and shown in a page rendered by Scriptable. The widget is drawn natively by Scriptable from the same data.
+
+BlogPulse follows four shared blueprints: in-app updates, settings, AI configuration and launch screen. **Settings › Built with** lists them with their versions; [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md) adds the deviations.
 
 ## Troubleshooting
 

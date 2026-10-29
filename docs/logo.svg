@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" role="img" aria-label="BlogPulse logo: feed lines with a heartbeat pulse through the middle ending in a violet dot, and a teal new-article line">
+  <rect width="240" height="240" rx="54" fill="#0E1116"/>
+  <path d="M52 72 H188 M136 168 H172" fill="none" stroke="#F6F7F9" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round"/>
+  <path d="M46 120 H82 L98 88 L120 152 L138 102 L150 120 H166" fill="none" stroke="#F6F7F9" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="186" cy="120" r="13" fill="#A78BFA"/>
+  <path d="M52 168 H116" fill="none" stroke="#2DD4BF" stroke-width="7" stroke-linecap="round"/>
+</svg>
