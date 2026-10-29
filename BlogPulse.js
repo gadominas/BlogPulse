@@ -16,7 +16,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -773,6 +773,7 @@ function clientState() {
     categories: CATS.map(c => ({ id: c[0], label: c[1], color: c[2] })),
     settings: {
       groupBy: settings.groupBy, view: settings.view, readOnOpen: settings.readOnOpen, ai: settings.ai, aiProvider: settings.aiProvider, hasKey: !!aiKey(), checkUpdates: settings.checkUpdates !== false,
+      voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1, voiceGender: settings.voiceGender || "all",
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize, storyScope: settings.storyScope, category: settings.category || "all", inviteInstr: settings.inviteInstr || "",
     },
     story: (() => { const st = stories[storyKey()]; return st ? Object.assign({}, st, { stale: st.sig !== storySig(st.scope, st.cat) }) : null; })(),
@@ -828,7 +829,7 @@ async function handle(m) {
       { const pk = computePicks(Object.values(articles), cfg("picksMinRatings"), cfg("picksThreshold")); call("onPicks", pk); } break;
     case "markAll": for (const id of m.ids || []) if (articles[id]) articles[id].read = 1; break;
     case "open": if (a && a.link) { if (settings.readOnOpen) a.read = 1; saveAll(); await Safari.openInApp(a.link, false); } return;
-    case "set": if (["groupBy", "view", "readOnOpen", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates"].includes(m.k)) settings[m.k] = m.v; break;
+    case "set": if (["groupBy", "view", "readOnOpen", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates", "voiceURI", "voiceRate", "voicePitch", "voiceGender"].includes(m.k)) settings[m.k] = m.v; break;
     case "refresh": return runScan();
     case "discover": {
       let res = [];
@@ -870,6 +871,17 @@ async function handle(m) {
       catch (e) { return call("onTldr", a.id, { error: String(e.message || e) }); }
       saveAll(); return call("onTldr", a.id, a.tldr);
     }
+    case "articletext": {   // the article's own text, for "Listen to the full article"
+      if (!a) return;
+      const excerpt = a.ex || a.ai || a.desc || "";
+      let res;
+      try {
+        const r = await fetchText(a.link, 20), art = extractArticle(r.text);
+        res = art.words > 80 ? { paras: art.paras.slice(0, 80) } : excerpt ? { paras: [excerpt], partial: true } : { error: "This article couldn't be read" };
+      } catch (e) { res = excerpt ? { paras: [excerpt], partial: true } : { error: "This article couldn't be loaded" }; }
+      return call("onArticleText", a.id, res);
+    }
+    case "speak": if (m.text) Speech.speak(String(m.text).slice(0, 8000)); return;   // fallback when the page can't speak
     case "update-later": snoozeUpdate(); pendingUpdate = null; return;
     case "update-now": {
       let ok = false, msg = "";
@@ -949,6 +961,24 @@ function clientApp() {
       ${S.blueprints.map(b => `<button class="srow bp" data-act="openurl" data-v="${esc(bpLink(b))}"><div class="grow"><b>${esc(b.name)}</b><small class="muted">Blueprint ${esc(b.version)} · since BlogPulse ${esc(b.since)}</small></div><span class="go" aria-hidden="true">›</span></button>`).join("")}
       <button class="srow bp" data-act="openurl" data-v="${esc(S.blueprintsRepo)}"><div class="grow"><b>All blueprints</b><small class="muted">${esc(S.blueprintsRepo.replace("https://", ""))}</small></div><span class="go" aria-hidden="true">›</span></button>`;
   }
+  function listenHTML() {
+    if (!SYN || !voices.length) return `<p class="note">This device reads aloud with the system voice. Choose it in iOS Settings › Accessibility › Spoken Content.</p>`;
+    const g = S.settings.voiceGender || "all", cur = currentVoice();
+    const shown = voices.filter(v => g === "all" || genderOf(v) === g || v === cur);
+    const langs = {};
+    shown.forEach(v => (langs[v.lang] = langs[v.lang] || []).push(v));
+    const mine = (navigator.languages || [navigator.language || "en"]).map(l => l.toLowerCase().split("-")[0]);
+    const rankLang = l => { const b = l.toLowerCase().split(/[-_]/)[0]; const i = mine.indexOf(b); return i >= 0 ? i : b === "en" ? 50 : 100; };
+    const order = Object.keys(langs).sort((x, y) => rankLang(x) - rankLang(y) || langName(x).localeCompare(langName(y)));
+    const label = v => `${baseName(v)}${quality(v) ? " — " + quality(v) : ""}${genderOf(v) ? (genderOf(v) === "f" ? " (female)" : " (male)") : ""}`;
+    const seg = (k, opts) => `<div class="seg wide">${opts.map(([v, l]) => `<button class="${String(S.settings[k]) === String(v) ? "on" : ""}" data-act="voiceset" data-k="${k}" data-v="${v}">${l}</button>`).join("")}</div>`;
+    return `<div class="lk-row"><span class="lk-l">Voice</span>${seg("voiceGender", [["all", "All"], ["f", "Female"], ["m", "Male"]])}
+      <select class="voicesel" aria-label="Voice">${order.map(l => `<optgroup label="${esc(langName(l))} (${esc(l)})">${langs[l].map(v => `<option value="${esc(v.voiceURI)}" ${cur && v.voiceURI === cur.voiceURI ? "selected" : ""}>${esc(label(v))}</option>`).join("")}</optgroup>`).join("")}</select></div>
+      <div class="lk-row"><span class="lk-l">Speed</span>${seg("voiceRate", [[0.85, "Slow"], [1, "Normal"], [1.15, "Fast"], [1.3, "Faster"]])}</div>
+      <div class="lk-row"><span class="lk-l">Pitch</span>${seg("voicePitch", [[0.85, "Lower"], [1, "Normal"], [1.15, "Higher"]])}</div>
+      <div class="aic-btns"><button class="sm" data-act="voicetest">${SPK}Test the voice</button><span class="note">${voices.length} voices on this ${/iPad/.test(navigator.userAgent) ? "iPad" : "iPhone"}</span></div>
+      <p class="note">More natural voices: iOS Settings › Accessibility › Spoken Content › Voices. Download an Enhanced or Premium voice and it appears here.</p>`;
+  }
   function renderCfg() {
     const el = $("#cfgsheet"), keepTop = el.scrollTop;
     el.classList.toggle("open", cfgOpen); lockBody();
@@ -972,6 +1002,7 @@ function clientApp() {
       <h3 class="sec">Reading</h3>
       <div class="srow"><div class="grow"><b>Mark as read when opened</b><small class="muted">Off: you mark posts read yourself</small></div><button class="switch ${S.settings.readOnOpen ? "on" : ""}" data-act="toggle" data-v="readOnOpen" aria-label="Mark as read when opened"></button></div>
       <div class="srow"><div class="grow"><b>Picks</b><small class="muted">${S.picksReady ? `Learning from ${S.rated} ratings` : `Rate ${Math.max(0, S.cfg.picksMinRatings - S.rated)} more post${S.cfg.picksMinRatings - S.rated === 1 ? "" : "s"} to switch on`}</small></div></div>
+      <h3 class="sec">Listening</h3>${listenHTML()}
       <h3 class="sec">Updates</h3>
       <div class="srow"><div class="grow"><b>Offer new versions</b><small class="muted">You have BlogPulse ${esc(S.version)}. “Later” waits two days.</small></div><button class="switch ${S.settings.checkUpdates ? "on" : ""}" data-act="toggle" data-v="checkUpdates" aria-label="Offer new versions"></button></div>
       <div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>
@@ -1072,6 +1103,7 @@ function clientApp() {
       ${d.why ? `<p class="tli-why"><b>Why it matters:</b> ${esc(d.why)}</p>` : ""}
       ${!d.why && d.sections && d.sections.length ? `<p class="tli-why"><b>Covers:</b> ${d.sections.map(esc).join(" / ")}</p>` : ""}
       <div class="tli-act">
+        <button class="sm" data-act="listentldr" data-id="${a.id}">${SPK}Listen</button>
         <button class="sm" data-act="tldrpanel" data-id="${a.id}">${S.settings.hasKey ? "✦ " : ""}Invite to read</button>
         ${d.kind !== "ai" && S.settings.hasKey ? `<button class="sm" data-act="tldrretry" data-id="${a.id}">✦ Summarise with AI</button>` : ""}
         <button class="hide" data-act="tldr" data-id="${a.id}">Hide</button>
@@ -1191,6 +1223,116 @@ function clientApp() {
     if (r.error) toast("Invite not written: " + r.error); else inv.out[id] = r;
     if (tldrId === id) renderTldr();
   };
+  // ── Read aloud: system voices through the Web Speech API ──
+  const SYN = window.speechSynthesis;
+  const SPK = `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>`;
+  const GENDER = {};
+  ("Samantha Karen Moira Tessa Fiona Veena Victoria Allison Ava Susan Zoe Nicky Kate Serena Martha Catherine Isha Agnes Kathy Princess Vicki Joelle Flo Sandy Shelley Grandma " +
+   "Amélie Audrey Aurélie Marie Anna Petra Helena Alice Federica Paulina Mónica Monica Marisol Luciana Joana Milena Katya Yuna Kyoko Ting-Ting Tingting Sin-ji Mei-Jia Meijia " +
+   "Lekha Sara Nora Ellen Laura Zuzana Ioana Mariska Melina Yelda Damayanti Kanya Lesya Carmit Laila Amira Tünde Linh Montse Ewa Zosia Iveta Lana Satu Klara Alva Kristina Ellen Soumya Vani")
+    .split(" ").forEach(n => GENDER[n] = "f");
+  ("Daniel Alex Fred Aaron Arthur Rishi Oliver Tom Gordon Lee Evan Nathan Rocko Eddy Reed Ralph Grandpa Thomas Jacques Markus Yannick Luca Diego Jorge Juan Carlos Felipe Xander " +
+   "Maged Majed Tarik Otoya Hattori Li-mu Yu-shu Aman Neel Dariush Rodrigo Martin Henrik Magnus Oskar Viktor Tünde")
+    .split(" ").forEach(n => GENDER[n] = GENDER[n] || "m");
+  const NOVELTY = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Good News|Jester|Organ|Pipe Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Deranged|Hysterical)\b/i;
+  const baseName = v => v.name.replace(/\s*\((Enhanced|Premium|Compact)\)/i, "").replace(/\s*\(.*\)\s*$/, "").trim();
+  const quality = v => /premium/i.test(v.name + v.voiceURI) ? "Premium" : /enhanced/i.test(v.name + v.voiceURI) ? "Enhanced" : "";
+  const genderOf = v => GENDER[baseName(v)] || "";
+  let voices = [];
+  function loadVoices() { voices = SYN ? SYN.getVoices().filter(v => !NOVELTY.test(v.name)) : []; if (cfgOpen) renderCfg(); }
+  if (SYN) { loadVoices(); SYN.addEventListener ? SYN.addEventListener("voiceschanged", loadVoices) : (SYN.onvoiceschanged = loadVoices); }
+  function currentVoice() {
+    if (!voices.length) return null;
+    const saved = voices.find(v => v.voiceURI === S.settings.voiceURI);
+    if (saved) return saved;
+    const en = voices.filter(v => /^en(-|_|$)/i.test(v.lang));   // posts are mostly English
+    const rank = v => (quality(v) === "Premium" ? 3 : quality(v) === "Enhanced" ? 2 : 0) + (v.default ? 1 : 0) + (/en-(US|GB)/i.test(v.lang) ? 0.5 : 0);
+    return (en.length ? en : voices).slice().sort((x, y) => rank(y) - rank(x))[0];
+  }
+  const langName = code => { try { return new Intl.DisplayNames([navigator.language || "en"], { type: "language" }).of(code) || code; } catch (e) { return code; } };
+  const clean = t => String(t || "").replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, "").replace(/\*\*|__/g, "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
+  function chunks(t) {   // short pieces: long utterances can stop early in WebKit
+    const out = [];
+    for (let sen of clean(t).match(/[^.!?…]+[.!?…]+["”’)]*\s*|[^.!?…]+$/g) || []) {
+      sen = sen.trim(); if (!sen) continue;
+      while (sen.length > 220) { let cut = sen.lastIndexOf(", ", 220); if (cut < 80) cut = sen.lastIndexOf(" ", 220); if (cut < 40) cut = 220; out.push(sen.slice(0, cut + 1).trim()); sen = sen.slice(cut + 1).trim(); }
+      if (out.length && out[out.length - 1].length + sen.length < 160) out[out.length - 1] += " " + sen; else out.push(sen);
+    }
+    return out;
+  }
+  const tts = { parts: [], i: 0, label: "", items: [], token: 0, paused: false, on: false, timer: null };
+  const playSoon = () => { clearTimeout(tts.timer); tts.timer = setTimeout(playPart, 60); };   // iOS needs a beat after cancel()
+  function speak(label, items) {
+    if (!SYN || !voices.length) {   // no Web Speech: hand the text to Scriptable's system voice
+      send("speak", { text: items.map(x => clean(x.text)).join(" ") });
+      return toast("Reading aloud with the system voice");
+    }
+    stopSpeaking(true);
+    tts.items = items; tts.label = label; tts.i = 0; tts.paused = false; tts.on = true;
+    tts.parts = [];
+    items.forEach((it, k) => chunks(it.text).forEach(t => tts.parts.push({ t, k })));
+    if (!tts.parts.length) return stopSpeaking();
+    playSoon();
+  }
+  function playPart() {
+    const my = ++tts.token, part = tts.parts[tts.i];
+    if (!part) return stopSpeaking();
+    const u = new SpeechSynthesisUtterance(part.t), v = currentVoice();
+    if (v) { u.voice = v; u.lang = v.lang; }
+    u.rate = Number(S.settings.voiceRate) || 1; u.pitch = Number(S.settings.voicePitch) || 1;
+    const next = () => { if (my !== tts.token) return; tts.i++; playPart(); };
+    u.onend = next; u.onerror = e => { if (e.error !== "interrupted" && e.error !== "canceled") next(); };
+    SYN.speak(u); renderPlayer();
+  }
+  function stopSpeaking(quiet) {
+    tts.token++; tts.on = false; tts.paused = false; clearTimeout(tts.timer);
+    if (SYN) SYN.cancel();
+    if (!quiet) renderPlayer();
+  }
+  function togglePause() {
+    if (!tts.on) return;
+    if (tts.paused) { SYN.resume(); tts.paused = false; } else { SYN.pause(); tts.paused = true; }
+    renderPlayer();
+  }
+  function skipItem() {
+    if (!tts.on) return;
+    const k = (tts.parts[tts.i] || {}).k, j = tts.parts.findIndex((p, n) => n > tts.i && p.k !== k);
+    if (j < 0) return stopSpeaking();
+    tts.token++; SYN.cancel(); tts.i = j; tts.paused = false; playSoon();
+  }
+  function renderPlayer() {
+    const pl = $("#player"), on = tts.on;
+    pl.hidden = !on; document.body.classList.toggle("playing", on);
+    document.querySelectorAll(".speaking").forEach(el => el.classList.remove("speaking"));
+    if (!on) return;
+    const part = tts.parts[tts.i] || {}, it = tts.items[part.k] || {};
+    $("#plTitle").textContent = it.title || tts.label;
+    $("#plSub").textContent = tts.label + (tts.items.length > 1 ? ` — ${part.k + 1} of ${tts.items.length}` : "") + (tts.paused ? " — paused" : "");
+    pl.classList.toggle("paused", tts.paused);
+    $("#plPause").innerHTML = tts.paused ? PLAY_ICO : PAUSE_ICO;
+    $("#plPause").setAttribute("aria-label", tts.paused ? "Resume" : "Pause");
+    if (it.id) { const c = document.getElementById("c-" + it.id); if (c) c.classList.add("speaking"); }
+  }
+  const PLAY_ICO = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`, PAUSE_ICO = `<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>`;
+  const srcTitle = a => (srcMap()[a.src] || {}).title || "";
+  const postItem = a => ({ id: a.id, title: a.title, text: `${a.title}. From ${srcTitle(a)}. ${a.desc || ""}` });
+  function tldrItems(a, d) {
+    const parts = [d.lead].concat(d.points || []).concat(d.why ? ["Why it matters: " + d.why] : []);
+    return [{ id: a.id, title: a.title, text: `${a.title}. From ${srcTitle(a)}. ${parts.map(x => /[.!?]$/.test(x) ? x : x + ".").join(" ")}` }];
+  }
+  function storyItems(st) {
+    const items = [{ title: st.headline, text: `${st.headline}. ${st.dek || ""}` }];
+    if (st.tldr && st.tldr.length) items.push({ title: "In short", text: "In short. " + st.tldr.map(x => clean(x).replace(/[.!?]?$/, ".")).join(" ") });
+    st.sections.forEach(x => items.push({ title: x.title, text: `${x.title}. ${x.body}` }));
+    return items;
+  }
+  window.onArticleText = (id, r) => {
+    const a = byId(id); if (!a) return;
+    if (r.error) return toast(r.error);
+    speak("Full article", [{ id, title: a.title, text: `${a.title}. From ${srcTitle(a)}. ${r.paras.join(" ")}` }]);
+    if (r.partial) toast("The full page couldn't be read, so this is the excerpt");
+  };
+
   window.onTldr = (id, d) => { tl[id] = d; if (tldrId === id) renderTldr(); if (expanded.has(id)) refreshInline(id); };
   window.onStory = busy => { storyBusy = !!busy; if (view === "story") render(); };
   window.onPicks = pk => {
@@ -1341,7 +1483,7 @@ function clientApp() {
     $("#list").innerHTML = groups.map(g => {
       const [big, small] = label(g.k), unread = g.items.filter(a => !a.read).length;
       return `<section><header class="gh"><div><h2>${big}</h2><span>${esc(small)}</span></div>
-        <div class="gh-r"><span class="n">${g.items.length} post${g.items.length > 1 ? "s" : ""}</span>${unread ? `<button data-act="markgroup" data-v="${g.k}">Mark ${unread} read</button>` : ""}</div></header>
+        <div class="gh-r"><span class="n">${g.items.length} post${g.items.length > 1 ? "s" : ""}</span><div class="gh-acts"><button class="gh-listen" data-act="listengroup" data-v="${g.k}" aria-label="Listen to ${esc(big)}">${SPK}Listen</button>${unread ? `<button data-act="markgroup" data-v="${g.k}">Mark ${unread} read</button>` : ""}</div></div></header>
         ${g.items.map(a => card(a, sm)).join("")}</section>`;
     }).join("") + (list.length > limit ? `<button class="more" data-act="more">Show ${Math.min(pageSize(), list.length - limit)} more</button>` : "");
   }
@@ -1377,6 +1519,7 @@ function clientApp() {
       <p class="kicker"><span class="badge-ai">✦ AI-written${st.provider ? " by " + (st.provider === "openai" ? "OpenAI" : "Claude") : ""}</span> ${rel(st.at)} from ${posts.length} posts across ${blogs} blog${blogs === 1 ? "" : "s"}${category !== "all" ? " in " + esc(catInfo(category).label) : ""}</p>
       <h1 class="st-h">${esc(st.headline)}</h1>
       ${st.dek ? `<p class="dek">${esc(st.dek)}</p>` : ""}
+      <button class="listen" data-act="listenstory">${SPK}Listen to the story</button>
       ${st.tldr && st.tldr.length ? `<div class="st-tldr"><div class="st-tldr-h"><b>TL;DR</b><span class="badge-ai">✦ AI</span></div><ul>${st.tldr.map(x => `<li>${storyText(x, st.ids).replace(/^<p>|<\/p>$/g, "")}</li>`).join("")}</ul></div>` : ""}
       ${st.stale ? `<div class="stale"><span>New posts arrived after this was written.</span><button data-act="rewrite">Rewrite</button></div>` : ""}
       ${st.mustRead && st.mustRead.length ? `<div class="must"><h2>Start with these</h2>${st.mustRead.map(m => { const a = am[m.id]; return a ? `<button class="mr" data-act="open" data-id="${a.id}"><b>${esc(a.title)}</b><small>${esc((sm[a.src] || {}).title || "")}</small><span>${esc(m.why)}</span></button>` : ""; }).join("")}</div>` : ""}
@@ -1427,7 +1570,8 @@ function clientApp() {
       if (d.sections && d.sections.length) h += `<div class="tl-secs"><b>What the article covers</b><ul>${d.sections.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
       h += d.kind === "ai" ? `<button class="sm" data-act="tldrretry" data-id="${a.id}">Summarise again</button>`
         : S.settings.hasKey ? `<button class="sm" data-act="tldrretry" data-id="${a.id}">✦ Summarise with AI</button>`
-        : `<p class="muted small">Add a Claude or OpenAI key under Blogs to get AI summaries.</p>`;
+        : `<p class="muted small">Add a Claude or OpenAI key in Settings › AI settings to get AI summaries.</p>`;
+      h += `<div class="tl-listen"><button class="sm" data-act="listentldr" data-id="${a.id}">${SPK}Listen to the TL;DR</button><button class="sm" data-act="listenarticle" data-id="${a.id}">${SPK}Listen to the full article</button></div>`;
       h += inviteBlock(a);
     }
     h += `<div class="tl-actions"><div class="stars ${a.rating ? "rated" : ""}">${stars}</div>
@@ -1505,6 +1649,19 @@ function clientApp() {
         if (S.settings.readOnOpen && !a.read) { a.read = true; keep.add(a.id); setTimeout(() => view === "story" ? render() : refreshCard(a), 300); }
         send("open", { id }); break;
       case "read": a.read = !a.read; keep.add(a.id); send("read", { id, v: a.read }); refreshCard(a); if (tldrId) renderTldr(); break;
+      case "listengroup": { const items = (groupIdx[v] || []).map(postItem); if (items.length) speak(label(+v)[0], items); break; }
+      case "listenstory": if (S.story) speak("Story", storyItems(S.story)); break;
+      case "listentldr": { const d = tl[id]; if (a && d && d !== "loading" && !d.error) speak("TL;DR", tldrItems(a, d)); break; }
+      case "listenarticle":   // speak right away (iOS only lets speech start from a tap), then the article follows
+        if (a) { speak("Full article", [{ id, title: a.title, text: "Loading the article." }]); send("articletext", { id }); } break;
+      case "plpause": togglePause(); break;
+      case "plnext": skipItem(); break;
+      case "plstop": stopSpeaking(); break;
+      case "voiceset": {
+        const k = t.dataset.k, val = k === "voiceGender" ? v : +v;
+        S.settings[k] = val; send("set", { k, v: val }); renderCfg(); break;
+      }
+      case "voicetest": speak("Voice test", [{ title: "Voice test", text: "Hello! This is how BlogPulse will read your news and stories to you." }]); break;
       case "tldr":
         if (expanded.has(id)) expanded.delete(id);
         else { expanded.add(id); if (!tl[id] || tl[id].error) { tl[id] = "loading"; send("tldr", { id }); } }
@@ -1605,6 +1762,10 @@ function clientApp() {
   document.addEventListener("touchmove", e => { if (e.touches.length > 1 || (e.scale && e.scale !== 1)) e.preventDefault(); }, { passive: false });
   document.addEventListener("change", e => {
     if (e.target.classList && e.target.classList.contains("catsel")) send("srccat", { id: e.target.dataset.id, v: e.target.value });
+    if (e.target.classList && e.target.classList.contains("voicesel")) {
+      S.settings.voiceURI = e.target.value; send("set", { k: "voiceURI", v: e.target.value });
+      if (tts.on) { tts.token++; SYN.cancel(); playSoon(); }   // switch voice mid-sentence
+    }
     if (e.target.classList && e.target.classList.contains("modelsel")) send("aimodel", { p: e.target.dataset.p, v: e.target.value });
     if (e.target.classList && e.target.classList.contains("cfgin")) {
       const d = cfgItem(e.target.dataset.k);
@@ -1867,6 +2028,30 @@ button.srow.bp{width:100%;background:none;border:0;border-bottom:1px solid var(-
 .switch.on{background:var(--signal)}
 .switch.on::after{transform:translateX(18px)}
 
+.ico{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px;margin-right:5px;flex:none}
+.ico path:first-child{fill:currentColor;stroke:none}
+.gh-acts{display:flex;gap:14px;align-items:center}
+.gh-listen{display:inline-flex;align-items:center;color:var(--signal);font-weight:600;font-size:calc(13.5px * var(--ts))}
+.listen{display:inline-flex;align-items:center;margin:0 0 18px;padding:9px 14px;border-radius:20px;background:var(--signal-wash);color:var(--signal);border:1.5px solid var(--signal);font-weight:700;font-size:calc(14.5px * var(--ts))}
+.tl-listen{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+.sm .ico,.tl-listen .ico{width:15px;height:15px}
+.card.speaking{box-shadow:inset 4px 0 0 var(--amber)}
+.voicesel{display:block;width:100%;margin-top:8px;font:16px var(--sans);color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:9px;padding:9px 10px}
+#player{position:fixed;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom) + 10px);z-index:30;display:flex;align-items:center;gap:8px;padding:10px 10px 10px 14px;border-radius:16px;background:var(--ink);color:var(--paper);box-shadow:0 8px 28px rgba(0,0,0,.28)}
+#player[hidden]{display:none}
+.pl-info{flex:1;min-width:0}
+.pl-info b,.pl-info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-info b{font-size:14.5px}
+.pl-info small{font-size:12px;opacity:.75}
+.pl-btn{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;flex:none;background:rgba(127,127,127,.22)}
+.pl-btn svg{width:20px;height:20px;fill:currentColor}
+.eq{display:flex;align-items:flex-end;gap:2px;height:16px;flex:none}
+.eq i{width:3px;height:100%;background:currentColor;border-radius:2px;animation:eq 1s ease-in-out infinite}
+.eq i:nth-child(2){animation-delay:-.35s}.eq i:nth-child(3){animation-delay:-.7s}
+#player.paused .eq i{animation:none;height:40%}
+@keyframes eq{0%,100%{height:30%}50%{height:100%}}
+body.playing #list{padding-bottom:96px}
+body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 84px)}
 #toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 22px);transform:translate(-50%,20px);opacity:0;pointer-events:none;z-index:20;
   background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:12px;font-size:14px;font-weight:500;max-width:88vw;text-align:center;transition:opacity .2s,transform .2s}
 #toast.on{opacity:1;transform:translate(-50%,0)}
@@ -2019,7 +2204,7 @@ textarea.cfgin.wide{resize:vertical}
 .st-row{align-items:flex-start}
 .st-open{flex:1;min-width:0;display:block}
 .st-row .tlbtn{flex:none;margin-top:2px}
-@media (prefers-reduced-motion: reduce){#ptr{transition:none}.updp{animation:none}.spin-dot{animation-duration:2.4s}.tlbtn,.tlbtn .chev{transition:none}#top.busy .spin svg,.ln{animation:none}.sheet,#toast,#bar{transition:none}}
+@media (prefers-reduced-motion: reduce){.eq i{animation:none;height:60%}#ptr{transition:none}.updp{animation:none}.spin-dot{animation-duration:2.4s}.tlbtn,.tlbtn .chev{transition:none}#top.busy .spin svg,.ln{animation:none}.sheet,#toast,#bar{transition:none}}
 `;
 
 const REFRESH_SVG = `<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>`;
@@ -2057,6 +2242,13 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
 <div id="tldr" class="sheet" aria-label="TL;DR"></div>
 <div id="aisheet" class="sheet" aria-label="AI settings"></div>
 <div id="cfgsheet" class="sheet" aria-label="Settings"></div>
+<div id="player" hidden role="region" aria-label="Reading aloud">
+  <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
+  <div class="pl-info"><b id="plTitle"></b><small id="plSub"></small></div>
+  <button id="plPause" class="pl-btn" data-act="plpause" aria-label="Pause"></button>
+  <button class="pl-btn" data-act="plnext" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M6 5l9 7-9 7zM16 5h3v14h-3z"/></svg></button>
+  <button class="pl-btn" data-act="plstop" aria-label="Stop"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg></button>
+</div>
 <div id="toast" role="status"></div>
 <script>window.__INIT = ${safeJSON(clientState())};
 (${clientApp.toString()})();</script>

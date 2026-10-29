@@ -6,7 +6,7 @@
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.1.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.3.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![License](https://img.shields.io/badge/license-MIT-15803d)](LICENSE)
@@ -96,6 +96,7 @@ Feedly is still the better pick if you mainly read on a computer, use the web or
 | 🧭 **Story** | The latest posts blended into one short article with a TL;DR box, "Start with these" picks, and numbered links back to every post it draws on. One per topic, for *Since last visit*, *Today* or *This week*. |
 | ⚡ **TL;DR in place** | Tap **TL;DR** on any post to see its main point, key facts and why it matters, right in the list. Without AI, the key sentences are extracted from the article itself. |
 | ✉️ **Invite to read** | Write a short note inviting a colleague to read a post, following your own instructions (tone, length, language), then share it anywhere. |
+| 🔊 **Listen** | Have a day's posts, the Story, a TL;DR or a full article read aloud. Pick a female or male voice, speed and pitch; it uses your iPhone's own voices, so it's free and works offline. |
 | ⭐ **Ratings and Picks** | Rate posts 1 to 3 stars. **Picks** surfaces unread posts like the ones you loved. |
 | 📅 **By day or by week** | Group posts the way you read them, and mark a whole day as read in one tap. |
 | 🎨 **Make it yours** | Six colour themes plus Auto (follows light and dark mode), Comfortable, Compact or Tiny layouts, four text sizes, sans or serif headlines. |
@@ -139,6 +140,8 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | Mark as read | Tap **Mark read**, or **Mark N read** next to a day to clear the whole day |
 | Rate | Tap one, two or three stars. Tap the same star again to clear it |
 | Read the Story | Open the **Story** tab and choose *Since last visit*, *Today* or *This week* |
+| Listen instead of reading | Tap **Listen** next to a day, **Listen to the story**, or **Listen** in a TL;DR. Pause, skip or stop from the player at the bottom |
+| Change the voice | **Settings › Listening**: filter Female or Male, pick a voice, set speed and pitch, then **Test the voice** |
 | Invite someone to read | Open the TL;DR, tap **Invite to read**, add your instructions, then **Share…** |
 | Check for new posts | Pull the list down and hold until the ring fills, or tap refresh |
 | Change anything else | Tap **Settings** |
@@ -175,6 +178,7 @@ BlogPulse reads the public RSS or Atom feed each blog already publishes. When yo
 | The Story tab is missing | It appears once an AI key is saved in **Settings › AI settings** |
 | "Key saved, but checking it failed" | The key was rejected or has no credit. Tap **Change key** and paste a valid one |
 | The widget shows old posts | Open BlogPulse once; the widget updates from it |
+| The voice sounds robotic | Download an Enhanced or Premium voice in iOS Settings › Accessibility › Spoken Content › Voices, then pick it in **Settings › Listening** |
 | An update says GitHub is serving the old version | Wait a few minutes after a release and tap **Try again** |
 
 ## Contributing
