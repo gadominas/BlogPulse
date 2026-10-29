@@ -10,7 +10,7 @@ Every tech blog you care about, checked the moment you open it.<br>Sorted by top
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.9.1-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.9.2-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![License](https://img.shields.io/badge/license-MIT-15803d)](LICENSE)
@@ -191,7 +191,7 @@ BlogPulse follows four shared blueprints: in-app updates, settings, AI configura
 | The widget shows old posts, or **⟳ Updated …** in amber | Open BlogPulse once; the widget updates from it |
 | The voice sounds robotic | Download an Enhanced or Premium voice in iOS Settings › Accessibility › Spoken Content › Voices, then pick it in **Settings › Listening** |
 | An update says GitHub is serving the old version | Wait a few minutes after a release and tap **Try again** |
-| BlogPulse won't open, or stays on "Loading your posts…" | Swipe Scriptable away to quit it, open it again, and run **Install BlogPulse** once. If it still sticks, the screen shows what it was waiting for |
+| BlogPulse won't open, or stays on "Loading your posts…" | Swipe Scriptable away to quit it, open it again, and run **Install BlogPulse** once. If it still sticks, the screen shows what it was waiting for, and **Settings › Updates › Start-up log** shows each step of the last openings |
 
 ## Contributing
 

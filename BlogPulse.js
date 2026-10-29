@@ -19,7 +19,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.9.1';
+const VERSION = '1.9.2';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -962,6 +962,11 @@ async function handle(m) {
       catch (e) { msg = String(e.message || e); }
       return call("__done", m.req, ok, msg);
     }
+    case "startlog": {
+      let txt = "";
+      try { txt = FileManager.local().readString(LOG_PATH).split("\n").slice(-40).join("\n"); } catch (e) {}
+      return call("__done", m.req, true, txt);
+    }
     case "openurl":   // Settings › Built with: only the blueprints repository opens from here
       if (m.v === BLUEPRINTS_REPO || String(m.v).startsWith(BLUEPRINTS_REPO + "/")) await Safari.openInApp(m.v, false);
       return;
@@ -1104,6 +1109,8 @@ function clientApp() {
       <h3 class="sec">Updates</h3>
       <div class="srow"><div class="grow"><b>Offer new versions</b><small class="muted">You have BlogPulse ${esc(S.version)}. Checked each time BlogPulse opens.</small></div><button class="switch ${S.settings.checkUpdates ? "on" : ""}" data-act="toggle" data-v="checkUpdates" aria-label="Offer new versions"></button></div>
       <div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>
+      <div class="srow"><div class="grow"><b>Start-up log</b><small class="muted">What happened the last times BlogPulse opened</small></div><button class="sm" data-act="startlog">Show</button></div>
+      <pre id="startlog" class="startlog" hidden></pre>
       <h3 class="sec">AI</h3>
       <div class="srow"><div class="grow"><b>Keys, models and token usage</b><small class="muted">${S.settings.hasKey ? `${PN[S.ai.provider]} — ${esc(S.ai.model[S.ai.provider])}${S.ai.usage.p[S.ai.provider] ? " — " + fmtN(S.ai.usage.p[S.ai.provider].in + S.ai.usage.p[S.ai.provider].out) + " tokens used" : ""}` : "Add a Claude or OpenAI key for summaries, Story and TL;DR"}</small></div>
         <button class="sm ${S.settings.hasKey ? "" : "primary"}" data-act="aiopen">AI settings</button></div>
@@ -1864,6 +1871,12 @@ function clientApp() {
       case "upd-later": updLater(); break;
       case "upd-close": { const uo = document.getElementById("upd"); if (uo) uo.remove(); break; }
       case "openurl": send("openurl", { v }); break;
+      case "startlog": {
+        const pre = $("#startlog");
+        if (!pre.hidden) { pre.hidden = true; t.textContent = "Show"; break; }
+        send("startlog", {}, (ok, txt) => { pre.textContent = txt || "Nothing logged yet."; pre.hidden = false; t.textContent = "Hide"; });
+        break;
+      }
       case "updcheck": {
         const um = $("#updmsg"); t.disabled = true; um.textContent = "Checking…";
         send("update-check", {}, (ok, res) => { t.disabled = false; um.textContent = res || ""; if (/available/.test(res || "")) { cfgOpen = false; renderCfg(); } });
@@ -2288,6 +2301,7 @@ body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 84px)}
 #ptr.busy .busy-dot{display:block}
 #ptr.busy .ptr-ring{display:none}
 .booting{display:flex;align-items:center;justify-content:center;gap:10px;padding:80px 20px;color:var(--muted);font-size:calc(14px * var(--ts))}
+.startlog{white-space:pre-wrap;font:12px/1.45 ui-monospace,Menlo,monospace;background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:10px;margin:8px 0;color:var(--ink-2);-webkit-user-select:text;user-select:text;max-height:260px;overflow:auto}
 .booting.note{flex-direction:column;text-align:center;color:var(--ink-2);padding:60px 24px}
 .booting.note b{font-size:calc(18px * var(--ts));color:var(--ink)}
 .booting.note pre{max-width:100%;overflow:auto;text-align:left;font:12px/1.45 ui-monospace,Menlo,monospace;background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:10px;color:var(--muted);white-space:pre-wrap;-webkit-user-select:text;user-select:text}
@@ -2525,11 +2539,20 @@ window.__bootNote = function (title, detail) {
   if (detail) b.querySelector("pre").textContent = detail;
 };
 setTimeout(function () { if (!window.__booted) window.__bootNote("Still loading…"); }, 25000);
+document.addEventListener("visibilitychange", function () {   // coming back into view: redraw
+  if (document.visibilityState !== "visible") return;
+  var d = document.documentElement; d.style.transform = "translateZ(0)"; void d.offsetHeight; d.style.transform = "";
+});
 window.__boot = function (st) {
   if (window.__booted) return;
   if (!st.articles || !st.articles.length) st.articles = [].concat.apply([], window.__parts);
   window.__parts = [];
   window.__booted = true; window.__INIT = st;
+  // make WebKit draw again once the posts are in (helps if the window came up black)
+  requestAnimationFrame(function () {
+    var d = document.documentElement; d.style.transform = "translateZ(0)"; void d.offsetHeight;
+    requestAnimationFrame(function () { d.style.transform = ""; });
+  });
   (${clientApp.toString()})();
 };</script>
 </body></html>`;
@@ -2869,7 +2892,9 @@ async function bootApp(isClosed) {
   st.articles = [];
   for (let i = 0; i < arts.length; i += 300) await ev(`window.__parts.push(${safeJSON(arts.slice(i, i + 300))})`);   // in pieces: one huge message can stall WebKit
   await ev(`window.__boot(${safeJSON(st)})`);
-  startLog(`screen ready in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  let seen = "";
+  try { seen = await ev(`document.visibilityState + ", " + innerWidth + "x" + innerHeight + ", splash " + (document.getElementById("splash") || {}).className`, 5000); } catch (e) { seen = String(e.message || e); }
+  startLog(`screen ready in ${((Date.now() - t0) / 1000).toFixed(1)} s (page: ${seen})`);
   if (loadIssues.length) toast("Some of your data is still coming from iCloud. Nothing will be saved until you reopen BlogPulse.");
   // Deferred work, once the first screen is drawn: checking blogs, then updates, then the widget's icon.
   Timer.schedule(700, false, () => { if (!isClosed() && dataLoaded && sources.length) runScan().catch(e => toast(String(e.message || e))); });
@@ -2884,9 +2909,14 @@ async function bootApp(isClosed) {
 async function main() {
   await waitForOtherWindow();
   buildWebView();
-  await wv.loadHTML(buildHTML());            // light page: launch screen, no posts inside
-  const presented = wv.present(true);        // on screen straight away
+  // A page built before its window is on screen can stay black on some iPhones (the page runs, nothing is drawn).
+  // So: show an empty dark window first, then build the real page inside it while it's visible.
+  await wv.loadHTML('<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;background:#0E1116"></body></html>');
+  const presented = wv.present(true);
   holdLock();
+  await pause(300);                          // let the window finish appearing
+  startLog("window on screen");
+  await Promise.race([wv.loadHTML(buildHTML()), pause(15000)]);   // the launch screen, drawn on screen
   let closed = false;
   presented.then(() => { closed = true; releaseLock(); });
   bootApp(() => closed).catch(e => {         // runs beside the window: closing it never waits on this
