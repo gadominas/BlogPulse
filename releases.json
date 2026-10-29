@@ -4,6 +4,37 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.9.2",
+      "date": "2026-10-29",
+      "title": "No more black screen",
+      "highlights": [
+        {
+          "icon": "🖥",
+          "title": "Drawn on screen",
+          "text": "BlogPulse now builds its page while the window is visible, so iOS draws it."
+        },
+        {
+          "icon": "🔄",
+          "title": "Redraw on arrival",
+          "text": "When your posts arrive, the screen is redrawn to be sure they show."
+        },
+        {
+          "icon": "🩺",
+          "title": "Start-up log",
+          "text": "Settings › Updates shows what happened the last times BlogPulse opened."
+        }
+      ],
+      "changes": [
+        "An empty dark window appears first; the real page is built inside it while it's visible",
+        "The page redraws itself once posts arrive and whenever it comes back into view",
+        "The start-up log records what the page reports about itself (visible or not, size)",
+        "Settings › Updates › Start-up log shows the last 40 lines"
+      ],
+      "fixes": [
+        "Black screen when opening from Scriptable, while the page had in fact loaded"
+      ]
+    },
+    {
       "version": "1.9.1",
       "date": "2026-10-29",
       "title": "Opens every time",

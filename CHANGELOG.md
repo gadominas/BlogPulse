@@ -2,6 +2,23 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.9.2 (2026-10-29): No more black screen
+
+- 🖥 **Drawn on screen**: BlogPulse now builds its page while the window is visible, so iOS draws it.
+- 🔄 **Redraw on arrival**: When your posts arrive, the screen is redrawn to be sure they show.
+- 🩺 **Start-up log**: Settings › Updates shows what happened the last times BlogPulse opened.
+
+**Changes**
+
+- An empty dark window appears first; the real page is built inside it while it's visible
+- The page redraws itself once posts arrive and whenever it comes back into view
+- The start-up log records what the page reports about itself (visible or not, size)
+- Settings › Updates › Start-up log shows the last 40 lines
+
+**Fixes**
+
+- Black screen when opening from Scriptable, while the page had in fact loaded
+
 ## 1.9.1 (2026-10-29): Opens every time
 
 - 🔓 **Always opens**: A stuck earlier run can no longer stop BlogPulse from opening.
