@@ -6,7 +6,7 @@
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.4.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.5.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![License](https://img.shields.io/badge/license-MIT-15803d)](LICENSE)
@@ -151,7 +151,7 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 
 <img src="docs/screenshots/07-update.png" width="250" align="right" alt="The update sheet showing three new features">
 
-BlogPulse checks this repository for a newer version each time it opens. If there is one, it shows the three best features and offers **Update now**. **Later**, or tapping outside, hides the reminder for two days. You can also check any time in **Settings › Updates**, or simply run the installer again.
+BlogPulse checks this repository for a newer version each time it opens. If there is one, it shows the three best features and offers **Update now**. **Later**, or tapping outside, hides it until you open BlogPulse again. You can also check any time in **Settings › Updates**, or simply run the installer again.
 
 See [CHANGELOG.md](CHANGELOG.md) for every release. Maintainers: release notes live in [`releases.json`](releases.json); see [docs/RELEASING.md](docs/RELEASING.md).
 

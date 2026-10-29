@@ -16,12 +16,13 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
-const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;   // "Later" = 2 days
-const KC_UPDATE_SNOOZE = 'blogpulse-update-snooze';   // Keychain key, unique per app
+// No snooze: "Later" only hides the offer until BlogPulse is opened again.
+// Up to 1.4.0 "Later" (or a tap outside the sheet) hid it for 2 days under this Keychain key; it's cleared at start.
+const KC_UPDATE_SNOOZE = 'blogpulse-update-snooze';
 
 // ───────── Blueprints ─────────
 // Shared blueprints this app was built with (github.com/gadominas/app-blueprints). One line per blueprint, in this exact shape:
@@ -309,7 +310,7 @@ let stories = await load("stories", {});   // AI story per "scope|category"
 for (const k of Object.keys(stories)) if (!k.includes("|")) delete stories[k];
 const settings = Object.assign(
   { groupBy: "day", view: "unread", readOnOpen: false, ai: true, aiProvider: "anthropic", lastSession: 0, lastScan: 0,
-    checkUpdates: true,   // offer new versions from GitHub (asks again 2 days after "Later")
+    checkUpdates: true,   // offer new versions from GitHub each time BlogPulse opens
     speechEngine: "device", ttsModel: "gpt-4o-mini-tts", ttsVoice: "coral", ttsInstructions: "",   // read aloud: iPhone voices or OpenAI
     theme: "auto", density: "comfortable", font: "sans", textSize: 1, storyScope: "new" },
   await load("settings", {})
@@ -722,14 +723,11 @@ function cmpVer(a, b) {
   }
   return 0;
 }
-function updateSnoozed() {
-  try { return Keychain.contains(KC_UPDATE_SNOOZE) && Date.now() < +Keychain.get(KC_UPDATE_SNOOZE); } catch (e) { return false; }
-}
-function snoozeUpdate() { Keychain.set(KC_UPDATE_SNOOZE, String(Date.now() + UPDATE_SNOOZE_MS)); }
-function clearUpdateSnooze() { if (Keychain.contains(KC_UPDATE_SNOOZE)) Keychain.remove(KC_UPDATE_SNOOZE); }
+function clearUpdateSnooze() { try { if (Keychain.contains(KC_UPDATE_SNOOZE)) Keychain.remove(KC_UPDATE_SNOOZE); } catch (e) {} }
+clearUpdateSnooze();   // a two-day "Later" left by an older version must not block offers
 
 async function checkForUpdate(force = false) {
-  if (!force && (settings.checkUpdates === false || updateSnoozed())) return null;
+  if (!force && settings.checkUpdates === false) return null;
   try {
     const req = new Request(`${REPO_RAW}releases.json?t=${Date.now()}`);
     req.timeoutInterval = 10;
@@ -920,10 +918,10 @@ async function handle(m) {
       try { return call("__done", m.req, true, await aiSpeech(m.text)); }
       catch (e) { return call("__done", m.req, false, String(e.message || e)); }
     case "speak": if (m.text) Speech.speak(String(m.text).slice(0, 8000)); return;   // fallback when the page can't speak
-    case "update-later": snoozeUpdate(); pendingUpdate = null; return;
+    case "update-later": pendingUpdate = null; return;   // asked again next time BlogPulse opens
     case "update-now": {
       let ok = false, msg = "";
-      try { msg = await applyUpdate(pendingUpdate); ok = true; pendingUpdate = null; clearUpdateSnooze(); }
+      try { msg = await applyUpdate(pendingUpdate); ok = true; pendingUpdate = null; }
       catch (e) { msg = String(e.message || e); }
       return call("__done", m.req, ok, msg);
     }
@@ -1063,7 +1061,7 @@ function clientApp() {
       <div class="srow"><div class="grow"><b>Picks</b><small class="muted">${S.picksReady ? `Learning from ${S.rated} ratings` : `Rate ${Math.max(0, S.cfg.picksMinRatings - S.rated)} more post${S.cfg.picksMinRatings - S.rated === 1 ? "" : "s"} to switch on`}</small></div></div>
       <h3 class="sec">Listening</h3>${listenHTML()}
       <h3 class="sec">Updates</h3>
-      <div class="srow"><div class="grow"><b>Offer new versions</b><small class="muted">You have BlogPulse ${esc(S.version)}. “Later” waits two days.</small></div><button class="switch ${S.settings.checkUpdates ? "on" : ""}" data-act="toggle" data-v="checkUpdates" aria-label="Offer new versions"></button></div>
+      <div class="srow"><div class="grow"><b>Offer new versions</b><small class="muted">You have BlogPulse ${esc(S.version)}. Checked each time BlogPulse opens.</small></div><button class="switch ${S.settings.checkUpdates ? "on" : ""}" data-act="toggle" data-v="checkUpdates" aria-label="Offer new versions"></button></div>
       <div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>
       <h3 class="sec">AI</h3>
       <div class="srow"><div class="grow"><b>Keys, models and token usage</b><small class="muted">${S.settings.hasKey ? `${PN[S.ai.provider]} — ${esc(S.ai.model[S.ai.provider])}${S.ai.usage.p[S.ai.provider] ? " — " + fmtN(S.ai.usage.p[S.ai.provider].in + S.ai.usage.p[S.ai.provider].out) + " tokens used" : ""}` : "Add a Claude or OpenAI key for summaries, Story and TL;DR"}</small></div>
@@ -1252,7 +1250,7 @@ function clientApp() {
       '<div class="updl">' + cards + "</div>" +
       '<div class="updmsg" aria-live="polite"></div>' +
       '<button class="primary updgo" data-act="upd-now">Update now</button>' +
-      '<button class="updlater" data-act="upd-later">Later, remind me in 2 days</button></div>';
+      '<button class="updlater" data-act="upd-later">Later</button></div>';
     document.body.appendChild(ov);
     ov.addEventListener("click", function (e) { if (e.target === ov) updLater(); });   // outside = Later
   };
