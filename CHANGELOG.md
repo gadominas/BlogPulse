@@ -2,6 +2,21 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.8.0 (2026-10-29): Your top pick on the Home Screen
+
+- 📲 **A new widget**: Your top pick, the latest ✦ Story line and more unread posts, on the BlogPulse logo.
+- 👆 **Tap straight to a post**: Each unread post in the medium and large widget opens its article.
+- 🕒 **Never out of date unnoticed**: The widget says when blogs were last checked, and turns amber when it's been a while.
+
+**Changes**
+
+- Home Screen widget redrawn in the shared frame all the apps use (app-blueprints · widgets 1.0.0): BlogPulse logo and name, "3 new" or "12 unread", the top pick with its reason and blog
+- Rows: the latest ✦ AI Story line, then other unread posts with their blog, each opening the article
+- "Scanned 10:05" footer; "All caught up" when everything is read; Lock Screen widgets show the top pick
+- Settings › Widget: new "Mark the widget as out of date after" (12 hours by default)
+- The widget still checks your blogs when the last check is old, within its time limit, but no longer changes BlogPulse's own files; otherwise it shows what BlogPulse last saved
+- Settings › Built with lists the Widgets blueprint
+
 ## 1.7.0 (2026-10-29): Catch up in one tap
 
 - ✅ **Mark all read**: Clear every unread post at once from the top of the list.

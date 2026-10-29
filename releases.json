@@ -4,6 +4,37 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.8.0",
+      "date": "2026-10-29",
+      "title": "Your top pick on the Home Screen",
+      "highlights": [
+        {
+          "icon": "📲",
+          "title": "A new widget",
+          "text": "Your top pick, the latest ✦ Story line and more unread posts, on the BlogPulse logo."
+        },
+        {
+          "icon": "👆",
+          "title": "Tap straight to a post",
+          "text": "Each unread post in the medium and large widget opens its article."
+        },
+        {
+          "icon": "🕒",
+          "title": "Never out of date unnoticed",
+          "text": "The widget says when blogs were last checked, and turns amber when it's been a while."
+        }
+      ],
+      "changes": [
+        "Home Screen widget redrawn in the shared frame all the apps use (app-blueprints · widgets 1.0.0): BlogPulse logo and name, \"3 new\" or \"12 unread\", the top pick with its reason and blog",
+        "Rows: the latest ✦ AI Story line, then other unread posts with their blog, each opening the article",
+        "\"Scanned 10:05\" footer; \"All caught up\" when everything is read; Lock Screen widgets show the top pick",
+        "Settings › Widget: new \"Mark the widget as out of date after\" (12 hours by default)",
+        "The widget still checks your blogs when the last check is old, within its time limit, but no longer changes BlogPulse's own files; otherwise it shows what BlogPulse last saved",
+        "Settings › Built with lists the Widgets blueprint"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.7.0",
       "date": "2026-10-29",
       "title": "Catch up in one tap",
