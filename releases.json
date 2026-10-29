@@ -4,6 +4,37 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.9.0",
+      "date": "2026-10-29",
+      "title": "Opens straight away",
+      "highlights": [
+        {
+          "icon": "⚡",
+          "title": "No more black screen",
+          "text": "BlogPulse shows its launch screen at once and loads your posts behind it."
+        },
+        {
+          "icon": "👆",
+          "title": "Safe with quick taps",
+          "text": "Tapping the widget several times no longer stacks up copies of the app."
+        },
+        {
+          "icon": "⏳",
+          "title": "Work waits its turn",
+          "text": "Checking blogs and updates starts after the first screen is drawn."
+        }
+      ],
+      "changes": [
+        "The page is shown before blogs, posts and stories are read from iCloud; a \"Loading your posts…\" note appears if iCloud is slow",
+        "Checking blogs starts 0.7 s after the first screen, the update check after 3.5 s, the widget icon after 6 s",
+        "Only one BlogPulse window at a time: a new run waits briefly, and steps aside if one is already open",
+        "Closing BlogPulse before posts finish loading never saves over them"
+      ],
+      "fixes": [
+        "Black screen when opening BlogPulse, especially from the widget or after several taps"
+      ]
+    },
+    {
       "version": "1.8.0",
       "date": "2026-10-29",
       "title": "Your top pick on the Home Screen",

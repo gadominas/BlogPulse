@@ -2,6 +2,23 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.9.0 (2026-10-29): Opens straight away
+
+- ⚡ **No more black screen**: BlogPulse shows its launch screen at once and loads your posts behind it.
+- 👆 **Safe with quick taps**: Tapping the widget several times no longer stacks up copies of the app.
+- ⏳ **Work waits its turn**: Checking blogs and updates starts after the first screen is drawn.
+
+**Changes**
+
+- The page is shown before blogs, posts and stories are read from iCloud; a "Loading your posts…" note appears if iCloud is slow
+- Checking blogs starts 0.7 s after the first screen, the update check after 3.5 s, the widget icon after 6 s
+- Only one BlogPulse window at a time: a new run waits briefly, and steps aside if one is already open
+- Closing BlogPulse before posts finish loading never saves over them
+
+**Fixes**
+
+- Black screen when opening BlogPulse, especially from the widget or after several taps
+
 ## 1.8.0 (2026-10-29): Your top pick on the Home Screen
 
 - 📲 **A new widget**: Your top pick, the latest ✦ Story line and more unread posts, on the BlogPulse logo.
