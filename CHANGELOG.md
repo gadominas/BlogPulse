@@ -2,6 +2,22 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.7.0 (2026-10-29): Catch up in one tap
+
+- ✅ **Mark all read**: Clear every unread post at once from the top of the list.
+- ⚠️ **A warning first**: You see how many posts will be marked, and where, before anything changes.
+- 🎯 **Only this page**: On a topic page, a blog or the New tab, only those posts are marked.
+
+**Changes**
+
+- Mark all read button above the list, with the unread count for the page
+- Confirmation sheet explaining the scope and that there's no single undo; tapping outside cancels
+- Respects the topic page, the selected blog and the New and Picks tabs; hidden on Story and Rated
+
+**Fixes**
+
+- Restores the logo and launch screen from 1.6.0, which a mistaken push briefly replaced on GitHub
+
 ## 1.6.0 (2026-10-29): Scan. Read. Rate.
 
 - 📈 **A logo of its own**: The pulse feed: a heartbeat through your reading list, a violet dot and a teal new-post line.

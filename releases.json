@@ -4,6 +4,36 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.7.0",
+      "date": "2026-10-29",
+      "title": "Catch up in one tap",
+      "highlights": [
+        {
+          "icon": "✅",
+          "title": "Mark all read",
+          "text": "Clear every unread post at once from the top of the list."
+        },
+        {
+          "icon": "⚠️",
+          "title": "A warning first",
+          "text": "You see how many posts will be marked, and where, before anything changes."
+        },
+        {
+          "icon": "🎯",
+          "title": "Only this page",
+          "text": "On a topic page, a blog or the New tab, only those posts are marked."
+        }
+      ],
+      "changes": [
+        "Mark all read button above the list, with the unread count for the page",
+        "Confirmation sheet explaining the scope and that there's no single undo; tapping outside cancels",
+        "Respects the topic page, the selected blog and the New and Picks tabs; hidden on Story and Rated"
+      ],
+      "fixes": [
+        "Restores the logo and launch screen from 1.6.0, which a mistaken push briefly replaced on GitHub"
+      ]
+    },
+    {
       "version": "1.6.0",
       "date": "2026-10-29",
       "title": "Scan. Read. Rate.",
