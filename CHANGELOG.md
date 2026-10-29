@@ -2,6 +2,24 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.3.0 (2026-10-29): Listen to your news
+
+- 🔊 **Read aloud**: Listen to a day's posts, the Story, a TL;DR or a full article.
+- 🗣 **Your choice of voice**: Pick a female or male voice, its speed and pitch, in Settings › Listening.
+- ⏯ **Player controls**: Pause, skip to the next post or stop from the bar at the bottom.
+
+**Changes**
+
+- Listen buttons next to each day or week, on the Story, in inline TL;DRs and in the TL;DR panel
+- Listen to the full article: BlogPulse reads the article page, or the feed excerpt when the page can't be read
+- Player bar with pause, next and stop; the post being read is highlighted
+- Settings › Listening: voice menu grouped by language with Female and Male filters, speed, pitch and a voice test
+- Uses the iPhone's own voices (free, offline); falls back to the system voice when speech isn't available
+
+**Fixes**
+
+- The TL;DR hint now points to Settings › AI settings
+
 ## 1.2.0 (2026-10-28): Built with
 
 - 🧩 **Built with**: A new last section in Settings shows the shared blueprints BlogPulse is built from.
