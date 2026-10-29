@@ -10,7 +10,7 @@ Every tech blog you care about, checked the moment you open it.<br>Sorted by top
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.7.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.9.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![License](https://img.shields.io/badge/license-MIT-15803d)](LICENSE)

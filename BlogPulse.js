@@ -19,7 +19,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.8.0';
+const VERSION = '1.9.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -310,10 +310,17 @@ async function load(n, def) {
 }
 const write = (n, v) => fm.writeString(P(n), JSON.stringify(v));
 
-let sources = await load("sources", []);
-let articles = await load("articles", {});
-let stories = await load("stories", {});   // AI story per "scope|category"
-for (const k of Object.keys(stories)) if (!k.includes("|")) delete stories[k];
+// Blogs, posts, stories and usage are read in loadData(): the app shows its first screen before
+// reading them, because iCloud can be slow to hand files over (a black screen when opened from the widget).
+let sources = [], articles = {}, stories = {}, dataLoaded = false;
+async function loadData() {
+  sources = await load("sources", []);
+  articles = await load("articles", {});
+  stories = await load("stories", {});   // AI story per "scope|category"
+  for (const k of Object.keys(stories)) if (!k.includes("|")) delete stories[k];
+  usage = await load("usage", usage);
+  dataLoaded = true;
+}
 const settings = Object.assign(
   { groupBy: "day", view: "unread", readOnOpen: false, ai: true, aiProvider: "anthropic", lastSession: 0, lastScan: 0,
     checkUpdates: true,   // offer new versions from GitHub each time BlogPulse opens
@@ -325,7 +332,8 @@ const prevSession = settings.lastSession || 0;   // everything first seen after 
 
 function saveAll(touchSession = true) {
   if (touchSession) settings.lastSession = Date.now();
-  write("sources", sources); write("articles", articles); write("settings", settings);
+  if (dataLoaded) { write("sources", sources); write("articles", articles); }   // never overwrite data that wasn't read yet
+  write("settings", settings);
 }
 
 // ---------- network ----------
@@ -486,7 +494,7 @@ const modelFor = p => (settings.model && settings.model[p]) || AI[p].model;
 const maskKey = k => k ? (k.length > 14 ? k.slice(0, 7) + "…" + k.slice(-4) : "…" + k.slice(-4)) : null;
 
 // token usage, kept per provider, model, feature and day
-let usage = await load("usage", { since: Date.now(), p: {} });
+let usage = { since: Date.now(), p: {} };   // read in loadData()
 const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 function recordUsage(provider, model, feature, tin, tout, chars = 0) {   // chars: text sent for speech
   const P = usage.p[provider] = usage.p[provider] || { calls: 0, in: 0, out: 0, models: {}, features: {}, days: {} };
@@ -2258,6 +2266,7 @@ body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 84px)}
 #ptr .busy-dot{display:none}
 #ptr.busy .busy-dot{display:block}
 #ptr.busy .ptr-ring{display:none}
+.booting{display:flex;align-items:center;justify-content:center;gap:10px;padding:80px 20px;color:var(--muted);font-size:calc(14px * var(--ts))}
 .busy-dot{width:15px;height:15px;flex:none;border-radius:50%;border:2px solid var(--rule);border-top-color:var(--signal);animation:spin .8s linear infinite}
 .readbtn{margin-left:auto}
 .acts{margin-left:auto;display:flex;align-items:center;gap:6px}
@@ -2451,7 +2460,7 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
 <div id="ptr" aria-live="polite"><div class="ptr-in">
   <svg class="ptr-ring" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="11" class="trk"/><circle id="ptrpull" cx="14" cy="14" r="11" class="pull"/><circle id="ptrhold" cx="14" cy="14" r="11" class="hold"/></svg>
   <span class="busy-dot"></span><span id="ptrtext">Pull down to check for new posts</span></div></div>
-<main id="list"></main>
+<main id="list"><div class="booting" role="status"><span class="busy-dot"></span>Loading your posts…</div></main>
 <p class="ver">BlogPulse v${VERSION}</p>
 <div id="sheet" class="sheet" aria-label="Manage blogs">
   <div class="sh-head"><h2>Blogs</h2><button class="link" data-act="sheet">Done</button></div>
@@ -2481,8 +2490,12 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
   sp.addEventListener("click", gone);   // tap to skip
   setTimeout(gone, 2900);               // out of the page once the CSS fade is done
 })();
-window.__INIT = ${safeJSON(clientState())};
-(${clientApp.toString()})();</script>
+// The page goes on screen first; Scriptable hands over the data once it has read it.
+window.__boot = function (st) {
+  if (window.__booted) return;
+  window.__booted = true; window.__INIT = st;
+  (${clientApp.toString()})();
+};</script>
 </body></html>`;
 
 // ---------- home-screen widget: BlogPulse's content for the shared frame below ----------
@@ -2786,22 +2799,59 @@ async function runWidget() {
 // ───────── end of Widget ─────────
 
 // ---------- run ----------
+// One BlogPulse window at a time: several widget taps in a row used to stack runs (and black screens).
+// A running app refreshes this lock every second; a new run waits briefly for it to go stale, else leaves the open window be.
+const lockFm = FileManager.local();
+const RUN_LOCK = lockFm.joinPath(lockFm.temporaryDirectory(), APP_ID + '-running');
+let lockTimer = null;
+const lockAge = () => { try { return lockFm.fileExists(RUN_LOCK) ? Date.now() - Number(lockFm.readString(RUN_LOCK)) : Infinity; } catch (e) { return Infinity; } };
+const pause = (ms) => new Promise(r => Timer.schedule(ms, false, r));
+async function acquireRunLock() {
+  for (let waited = 0; lockAge() < 2500; waited += 400) {
+    if (waited >= 3200) return false;   // another BlogPulse window is open and alive
+    await pause(400);
+  }
+  const beat = () => { try { lockFm.writeString(RUN_LOCK, String(Date.now())); } catch (e) {} };
+  beat(); lockTimer = Timer.schedule(1000, true, beat);
+  return true;
+}
+function releaseRunLock() {
+  if (lockTimer) { lockTimer.invalidate(); lockTimer = null; }
+  try { if (lockFm.fileExists(RUN_LOCK)) lockFm.remove(RUN_LOCK); } catch (e) {}
+}
+
 async function main() {
-  buildWebView();
-  await wv.loadHTML(buildHTML());
-  const presented = wv.present(true);
-  if (!updateChecked) { updateChecked = true; checkForUpdate().then(u => { pendingUpdate = u; offerUpdate(); }); }
-  if (sources.length) runScan().catch(e => toast(String(e.message || e)));
-  await presented;
+  if (!(await acquireRunLock())) return;
+  let closed = false;
+  try {
+    buildWebView();
+    await wv.loadHTML(buildHTML());          // light page: launch screen, no posts inside
+    const presented = wv.present(true);      // on screen straight away
+    presented.then(() => { closed = true; });
+    await loadData();                        // iCloud reads happen behind the launch screen
+    if (!closed) await wv.evaluateJavaScript(`window.__boot(${safeJSON(clientState())})`, false).catch(e => console.log('Boot: ' + e));
+    // Deferred work, once the first screen is drawn: checking blogs, then updates, then the widget's icon.
+    Timer.schedule(700, false, () => { if (!closed && sources.length) runScan().catch(e => toast(String(e.message || e))); });
+    Timer.schedule(3500, false, () => {
+      if (closed || updateChecked) return;
+      updateChecked = true;
+      checkForUpdate().then(u => { pendingUpdate = u; offerUpdate(); });
+    });
+    Timer.schedule(6000, false, () => { widgetIcon(); });
+    await presented;
+  } finally {
+    closed = true;
+    releaseRunLock();
+  }
   saveAll();
-  saveWidget(widgetSnapshot());   // leaving BlogPulse: nothing is "new" for the widget any more
+  if (dataLoaded) saveWidget(widgetSnapshot());   // leaving BlogPulse: nothing is "new" for the widget any more
 }
 
 // Settings are loaded at the top of the script (load("settings")), before every branch: app and widget runs both use the saved choices.
 if (config.runsInWidget || config.runsInAccessoryWidget) {
+  await loadData();
   await runWidget();             // never builds or presents a WebView, Alert or QuickLook
 } else {
-  widgetIcon();                  // caches the logo tile for the widget, in the background
   await main();
 }
 Script.complete();
