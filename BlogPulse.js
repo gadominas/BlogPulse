@@ -19,7 +19,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.9.0';
+const VERSION = '1.9.1';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -300,26 +300,46 @@ const fm = (() => { try { return FileManager.iCloud(); } catch (e) { return File
 const DIR = fm.joinPath(fm.documentsDirectory(), APP);
 if (!fm.fileExists(DIR)) fm.createDirectory(DIR, true);
 const P = n => fm.joinPath(DIR, n + ".json");
-async function load(n, def) {
+const loadIssues = [];   // files iCloud didn't hand over in time
+async function load(n, def, waitMs = 10000) {
   const p = P(n);
   if (!fm.fileExists(p)) return def;
   try {
-    if (fm.isFileStoredIniCloud(p) && !fm.isFileDownloaded(p)) await fm.downloadFileFromiCloud(p);
+    if (fm.isFileStoredIniCloud(p) && !fm.isFileDownloaded(p)) {
+      // iCloud can take a long time (or forever, offline): never let start-up hang on it
+      await Promise.race([fm.downloadFileFromiCloud(p), new Promise(r => Timer.schedule(waitMs, false, r))]);
+      if (!fm.isFileDownloaded(p)) { loadIssues.push(n); startLog(`iCloud didn't deliver ${n}.json in ${waitMs / 1000} s`); return def; }
+    }
     return JSON.parse(fm.readString(p));
-  } catch (e) { return def; }
+  } catch (e) { loadIssues.push(n); startLog(`Couldn't read ${n}.json: ${e}`); return def; }
 }
-const write = (n, v) => fm.writeString(P(n), JSON.stringify(v));
+// Data files are only written once they were read, so a slow start can never save an empty list over them.
+const write = (n, v) => {
+  if (n === "settings" ? !settingsOk : !dataLoaded) return;
+  fm.writeString(P(n), JSON.stringify(v));
+};
+
+// A short start-up log on the phone (local, not iCloud), shown if BlogPulse gets stuck while opening.
+const LOG_PATH = FileManager.local().joinPath(FileManager.local().documentsDirectory(), "blogpulse-startup.log");
+function startLog(msg) {
+  try {
+    const lfm = FileManager.local(), line = new Date().toISOString().slice(11, 19) + "  " + msg;
+    const old = lfm.fileExists(LOG_PATH) ? lfm.readString(LOG_PATH).split("\n").slice(-60) : [];
+    lfm.writeString(LOG_PATH, old.concat(line).join("\n"));
+  } catch (e) {}
+}
 
 // Blogs, posts, stories and usage are read in loadData(): the app shows its first screen before
 // reading them, because iCloud can be slow to hand files over (a black screen when opened from the widget).
 let sources = [], articles = {}, stories = {}, dataLoaded = false;
 async function loadData() {
+  loadIssues.length = 0;
   sources = await load("sources", []);
   articles = await load("articles", {});
   stories = await load("stories", {});   // AI story per "scope|category"
   for (const k of Object.keys(stories)) if (!k.includes("|")) delete stories[k];
   usage = await load("usage", usage);
-  dataLoaded = true;
+  dataLoaded = loadIssues.length === 0;   // anything missing: show what we have, save nothing over it
 }
 const settings = Object.assign(
   { groupBy: "day", view: "unread", readOnOpen: false, ai: true, aiProvider: "anthropic", lastSession: 0, lastScan: 0,
@@ -328,11 +348,12 @@ const settings = Object.assign(
     theme: "auto", density: "comfortable", font: "sans", textSize: 1, storyScope: "new" },
   await load("settings", {})
 );
+const settingsOk = !loadIssues.includes("settings");   // settings that were never read are never saved over
 const prevSession = settings.lastSession || 0;   // everything first seen after this is "new"
 
 function saveAll(touchSession = true) {
-  if (touchSession) settings.lastSession = Date.now();
-  if (dataLoaded) { write("sources", sources); write("articles", articles); }   // never overwrite data that wasn't read yet
+  if (touchSession && dataLoaded) settings.lastSession = Date.now();
+  write("sources", sources); write("articles", articles);   // write() skips these until the data was read
   write("settings", settings);
 }
 
@@ -2267,6 +2288,9 @@ body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 84px)}
 #ptr.busy .busy-dot{display:block}
 #ptr.busy .ptr-ring{display:none}
 .booting{display:flex;align-items:center;justify-content:center;gap:10px;padding:80px 20px;color:var(--muted);font-size:calc(14px * var(--ts))}
+.booting.note{flex-direction:column;text-align:center;color:var(--ink-2);padding:60px 24px}
+.booting.note b{font-size:calc(18px * var(--ts));color:var(--ink)}
+.booting.note pre{max-width:100%;overflow:auto;text-align:left;font:12px/1.45 ui-monospace,Menlo,monospace;background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:10px;color:var(--muted);white-space:pre-wrap;-webkit-user-select:text;user-select:text}
 .busy-dot{width:15px;height:15px;flex:none;border-radius:50%;border:2px solid var(--rule);border-top-color:var(--signal);animation:spin .8s linear infinite}
 .readbtn{margin-left:auto}
 .acts{margin-left:auto;display:flex;align-items:center;gap:6px}
@@ -2491,8 +2515,20 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
   setTimeout(gone, 2900);               // out of the page once the CSS fade is done
 })();
 // The page goes on screen first; Scriptable hands over the data once it has read it.
+window.__parts = [];
+window.__bootNote = function (title, detail) {
+  var b = document.querySelector(".booting"); if (!b) return;
+  b.className = "booting note";
+  b.innerHTML = "<b></b><span></span>" + (detail ? "<pre></pre>" : "");
+  b.querySelector("b").textContent = title;
+  b.querySelector("span").textContent = "Close BlogPulse and open it again. If it keeps happening, run the installer once more.";
+  if (detail) b.querySelector("pre").textContent = detail;
+};
+setTimeout(function () { if (!window.__booted) window.__bootNote("Still loading…"); }, 25000);
 window.__boot = function (st) {
   if (window.__booted) return;
+  if (!st.articles || !st.articles.length) st.articles = [].concat.apply([], window.__parts);
+  window.__parts = [];
   window.__booted = true; window.__INIT = st;
   (${clientApp.toString()})();
 };</script>
@@ -2799,51 +2835,70 @@ async function runWidget() {
 // ───────── end of Widget ─────────
 
 // ---------- run ----------
-// One BlogPulse window at a time: several widget taps in a row used to stack runs (and black screens).
-// A running app refreshes this lock every second; a new run waits briefly for it to go stale, else leaves the open window be.
+// A run marks itself as open while its window is on screen. A new run waits at most 1.5 s for an older
+// window to close, then opens anyway: it must never refuse to open (1.9.0 could, if an earlier run hung).
 const lockFm = FileManager.local();
 const RUN_LOCK = lockFm.joinPath(lockFm.temporaryDirectory(), APP_ID + '-running');
 let lockTimer = null;
 const lockAge = () => { try { return lockFm.fileExists(RUN_LOCK) ? Date.now() - Number(lockFm.readString(RUN_LOCK)) : Infinity; } catch (e) { return Infinity; } };
 const pause = (ms) => new Promise(r => Timer.schedule(ms, false, r));
-async function acquireRunLock() {
-  for (let waited = 0; lockAge() < 2500; waited += 400) {
-    if (waited >= 3200) return false;   // another BlogPulse window is open and alive
-    await pause(400);
-  }
+async function waitForOtherWindow() {
+  for (let waited = 0; lockAge() < 2500 && waited < 1500; waited += 300) await pause(300);
+}
+function holdLock() {
   const beat = () => { try { lockFm.writeString(RUN_LOCK, String(Date.now())); } catch (e) {} };
   beat(); lockTimer = Timer.schedule(1000, true, beat);
-  return true;
 }
-function releaseRunLock() {
+function releaseLock() {
   if (lockTimer) { lockTimer.invalidate(); lockTimer = null; }
   try { if (lockFm.fileExists(RUN_LOCK)) lockFm.remove(RUN_LOCK); } catch (e) {}
 }
+// Talks to the page with a time limit, so a stuck page can't stall the app.
+const ev = (js, ms = 20000) => Promise.race([
+  wv.evaluateJavaScript(js, false),
+  pause(ms).then(() => { throw new Error("the page didn't respond in " + ms / 1000 + " s"); }),
+]);
+
+async function bootApp(isClosed) {
+  const t0 = Date.now();
+  startLog(`BlogPulse ${VERSION}: reading data`);
+  await loadData();
+  startLog(`data read in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${sources.length} blogs, ${Object.keys(articles).length} posts${loadIssues.length ? "; missing: " + loadIssues.join(", ") : ""}`);
+  if (isClosed()) return;
+  const st = clientState(), arts = st.articles;
+  st.articles = [];
+  for (let i = 0; i < arts.length; i += 300) await ev(`window.__parts.push(${safeJSON(arts.slice(i, i + 300))})`);   // in pieces: one huge message can stall WebKit
+  await ev(`window.__boot(${safeJSON(st)})`);
+  startLog(`screen ready in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  if (loadIssues.length) toast("Some of your data is still coming from iCloud. Nothing will be saved until you reopen BlogPulse.");
+  // Deferred work, once the first screen is drawn: checking blogs, then updates, then the widget's icon.
+  Timer.schedule(700, false, () => { if (!isClosed() && dataLoaded && sources.length) runScan().catch(e => toast(String(e.message || e))); });
+  Timer.schedule(3500, false, () => {
+    if (isClosed() || updateChecked) return;
+    updateChecked = true;
+    checkForUpdate().then(u => { pendingUpdate = u; offerUpdate(); });
+  });
+  Timer.schedule(6000, false, () => { widgetIcon(); });
+}
 
 async function main() {
-  if (!(await acquireRunLock())) return;
+  await waitForOtherWindow();
+  buildWebView();
+  await wv.loadHTML(buildHTML());            // light page: launch screen, no posts inside
+  const presented = wv.present(true);        // on screen straight away
+  holdLock();
   let closed = false;
-  try {
-    buildWebView();
-    await wv.loadHTML(buildHTML());          // light page: launch screen, no posts inside
-    const presented = wv.present(true);      // on screen straight away
-    presented.then(() => { closed = true; });
-    await loadData();                        // iCloud reads happen behind the launch screen
-    if (!closed) await wv.evaluateJavaScript(`window.__boot(${safeJSON(clientState())})`, false).catch(e => console.log('Boot: ' + e));
-    // Deferred work, once the first screen is drawn: checking blogs, then updates, then the widget's icon.
-    Timer.schedule(700, false, () => { if (!closed && sources.length) runScan().catch(e => toast(String(e.message || e))); });
-    Timer.schedule(3500, false, () => {
-      if (closed || updateChecked) return;
-      updateChecked = true;
-      checkForUpdate().then(u => { pendingUpdate = u; offerUpdate(); });
-    });
-    Timer.schedule(6000, false, () => { widgetIcon(); });
-    await presented;
-  } finally {
-    closed = true;
-    releaseRunLock();
-  }
-  saveAll();
+  presented.then(() => { closed = true; releaseLock(); });
+  bootApp(() => closed).catch(e => {         // runs beside the window: closing it never waits on this
+    startLog("start-up failed: " + (e.message || e));
+    let log = "";
+    try { log = FileManager.local().readString(LOG_PATH).split("\n").slice(-12).join("\n"); } catch (x) {}
+    if (!closed) wv.evaluateJavaScript(`window.__bootNote("BlogPulse couldn't open", ${safeJSON(log)})`, false).catch(() => {});
+  });
+  await presented;
+  closed = true;
+  releaseLock();
+  saveAll();                                 // skips data that was never read
   if (dataLoaded) saveWidget(widgetSnapshot());   // leaving BlogPulse: nothing is "new" for the widget any more
 }
 
