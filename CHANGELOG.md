@@ -2,6 +2,20 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.4.0 (2026-10-29): Natural AI voices
+
+- ✦ **AI voice**: Have your news and the Story read by OpenAI's natural-sounding voices.
+- 🎙 **Pick the voice and style**: Female or male voices, the speech model, and a style such as "calm newsreader".
+- 📊 **See what it uses**: Characters read aloud are counted in AI settings, per model and day.
+
+**Changes**
+
+- Settings › Listening › Voice engine: iPhone voice or ✦ AI voice (OpenAI speech; needs an OpenAI key)
+- AI voice settings: voice with Female and Male filters, speech model loaded from your OpenAI account, style instructions for gpt-4o-mini-tts, speed, voice test
+- All Listen buttons use the chosen engine; the player shows ✦ AI voice and prepares the next piece while one plays
+- If an AI voice request fails, the iPhone voice takes over from the same place
+- Token usage shows characters read aloud per model, today and this month; AI settings always opens with fresh counts
+
 ## 1.3.0 (2026-10-29): Listen to your news
 
 - 🔊 **Read aloud**: Listen to a day's posts, the Story, a TL;DR or a full article.
