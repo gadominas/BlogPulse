@@ -109,7 +109,7 @@ Feedly is still the better pick if you mainly read on a computer, use the web or
 | 🧩 **Built with** | The last section of Settings lists the [shared blueprints](https://github.com/gadominas/app-blueprints) BlogPulse follows, each linked at the exact version used (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). |
 | 🤖 **AI settings** | Claude or OpenAI, any model your key can use, a connection test, and token usage by provider, feature, model and day. |
 | ⚙️ **Every setting on screen** | Timeouts, how long to keep posts, Picks strictness, AI limits, widget timing and your invite presets. No code editing. |
-| 📲 **Widget** | A short summary of what's new and your top pick, on the Home Screen. |
+| 📲 **Widget** | Your top pick, the latest ✦ Story line and more unread posts on the Home Screen, in the same frame and colours as the other apps' widgets (the shared [widgets](https://github.com/gadominas/app-blueprints/blob/main/blueprints/widgets.md) blueprint). |
 | ⬆️ **Updates itself** | When a new version is out, BlogPulse shows its three best features and installs it with one tap. |
 
 ## Home-screen widget
@@ -122,7 +122,9 @@ Feedly is still the better pick if you mainly read on a computer, use the web or
 1. Long-press your Home Screen, tap **Edit → Add Widget**, choose **Scriptable**, and pick a size.
 2. Long-press the new widget, tap **Edit Widget**, and set **Script** to *BlogPulse*.
 
-The medium and large widgets show a one-line summary (the latest Story when you use AI) and your top pick. The large one also lists more unread posts. Tapping the pick opens the article; tapping anywhere else opens BlogPulse. The widget checks your blogs itself when the last check is older than 30 minutes; you can change that in **Settings › Widget**.
+The widget shows the BlogPulse logo and name, how many posts are new or unread, and your top pick with its blog. The medium widget adds the latest ✦ Story line (when you use AI) or more unread posts beside it; the large one lists up to six rows under it. Tapping a post opens the article; tapping anywhere else opens BlogPulse. When everything is read it says **All caught up**. The bottom line says when your blogs were last checked, and turns amber (**⟳ Updated …**) when that is older than 12 hours. Lock Screen widgets show the top pick as text.
+
+The widget checks your blogs itself when the last check is older than 30 minutes, within 18 seconds, and otherwise shows what BlogPulse last saved; it never calls AI. You can change these times in **Settings › Widget**.
 
 ## AI, on your terms
 
@@ -186,7 +188,7 @@ BlogPulse follows four shared blueprints: in-app updates, settings, AI configura
 | Posts land on the wrong topic | In the blog list, set that blog to **Always** the right topic |
 | The Story tab is missing | It appears once an AI key is saved in **Settings › AI settings** |
 | "Key saved, but checking it failed" | The key was rejected or has no credit. Tap **Change key** and paste a valid one |
-| The widget shows old posts | Open BlogPulse once; the widget updates from it |
+| The widget shows old posts, or **⟳ Updated …** in amber | Open BlogPulse once; the widget updates from it |
 | The voice sounds robotic | Download an Enhanced or Premium voice in iOS Settings › Accessibility › Spoken Content › Voices, then pick it in **Settings › Listening** |
 | An update says GitHub is serving the old version | Wait a few minutes after a release and tap **Try again** |
 

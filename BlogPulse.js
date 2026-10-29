@@ -10,7 +10,7 @@
  *  - Add blogs by searching (built-in list + Feedly's public feed search) or by pasting any address
  *  - Mark read, rate 1–3 stars (ratings train Picks), group by day or week, topic pages
  *  - Optional Claude or OpenAI: summaries, categories, the Story, TL;DRs and invites to read
- *  - Home-screen widget, in-app updates from GitHub
+ *  - Home Screen widget in the shared frame (app-blueprints · widgets), in-app updates from GitHub
  *
  *  - Opens on a 2.4 s launch screen with the BlogPulse logo (app-blueprints · launch-screen)
  *  - The BLUEPRINTS block below lists every shared blueprint this app follows (Settings › Built with)
@@ -19,7 +19,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.7.0';
+const VERSION = '1.8.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -36,6 +36,7 @@ const BLUEPRINTS = [
   { id: 'settings', name: 'Settings', version: '1.0.0', since: '1.2.0' },
   { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.0.0' },
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.6.0' },
+  { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.8.0' },
 ];
 
 // ---------- config ----------
@@ -79,6 +80,7 @@ const CONFIG = [
   ]],
   ["Widget", [
     { k: "widgetRefreshMin", label: "Ask iOS to refresh every", help: "iOS decides the exact timing", unit: "min", def: 30, min: 15, max: 240, step: 15 },
+    { k: "widgetStaleMin", label: "Mark the widget as out of date after", help: "Older data shows \"Updated …\" in amber", unit: "min", def: 720, min: 60, max: 2880, step: 60 },
     { k: "widgetScanAfterMin", label: "Widget checks blogs if the last check is older than", unit: "min", def: 30, min: 10, max: 720, step: 10 },
     { k: "widgetScanBudget", label: "Time the widget may spend checking", unit: "s", def: 18, min: 5, max: 25, step: 1 },
     { k: "widgetStoryHours", label: "Show the AI story summary if newer than", unit: "h", def: 48, min: 1, max: 168, step: 1 },
@@ -822,8 +824,9 @@ function clientState() {
 const safeJSON = x => JSON.stringify(x === undefined ? null : x).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\//g, "<\\/");
 
 // ---------- UI ----------
-const wv = new WebView();
-const call = (fn, ...args) => wv.evaluateJavaScript(`window.${fn} && window.${fn}(${args.map(safeJSON).join(",")})`, false).catch(() => {});
+// The WebView is built in main() only, so a widget run never builds one (app-blueprints · widgets, Step 4).
+let wv = null;
+const call = (fn, ...args) => wv ? wv.evaluateJavaScript(`window.${fn} && window.${fn}(${args.map(safeJSON).join(",")})`, false).catch(() => {}) : Promise.resolve();
 const toast = msg => call("toast", msg);
 const push = () => call("recv", clientState());
 
@@ -835,7 +838,7 @@ async function storyAction(m) {
   const scope = settings.storyScope, cat = settings.category || "all";
   if ((stories[storyKey()] && !m.force) || storyBusy) { saveAll(); push(); return call("onStory", storyBusy); }
   storyBusy = true; call("onStory", true);
-  try { await makeStory(scope, cat); }
+  try { await makeStory(scope, cat); saveWidget(widgetSnapshot()); }   // the widget's ✦ story line
   catch (e) { toast("Story not written: " + String(e.message || e).slice(0, 90)); }
   storyBusy = false; saveAll(); push(); call("onStory", false);
 }
@@ -848,6 +851,7 @@ async function runScan() {
   const fresh = await scanAll((d, t) => call("onProgress", d, t));
   call("onProgress", 0, 0);
   saveAll(); push();
+  saveWidget(widgetSnapshot());   // the widget shows what this scan found
   const failed = sources.filter(s => s.err && !s.paused).length;
   toast((fresh.length ? `${fresh.length} new article${fresh.length > 1 ? "s" : ""}` : "No new articles") + (failed ? ` · ${failed} source${failed > 1 ? "s" : ""} failed` : ""));
   if (settings.ai && aiKey()) {
@@ -864,7 +868,7 @@ async function handle(m) {
     case "rate": if (a) { a.rating = m.v || 0; if (a.rating) a.read = 1; }
       { const pk = computePicks(Object.values(articles), cfg("picksMinRatings"), cfg("picksThreshold")); call("onPicks", pk); } break;
     case "markAll": for (const id of m.ids || []) if (articles[id]) articles[id].read = 1; break;
-    case "open": if (a && a.link) { if (settings.readOnOpen) a.read = 1; saveAll(); await Safari.openInApp(a.link, false); } return;
+    case "open": if (a && a.link) { if (settings.readOnOpen) { a.read = 1; saveWidget(widgetSnapshot()); } saveAll(); await Safari.openInApp(a.link, false); } return;
     case "set": if (["groupBy", "view", "readOnOpen", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "speechEngine", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v; break;
     case "refresh": return runScan();
     case "discover": {
@@ -875,7 +879,7 @@ async function handle(m) {
     case "add":
       try {
         const { src, count, fresh } = await addSource(m.feed, m.title);
-        saveAll(); push(); call("addDone", m.feed, true);
+        saveAll(); push(); call("addDone", m.feed, true); saveWidget(widgetSnapshot());
         toast(`Following ${src.title} · ${count} recent posts`);
         if (fresh.length && settings.ai && aiKey()) aiSummaries(fresh).then(n => { if (n) { saveAll(); push(); } }).catch(() => {});
       } catch (e) { call("addDone", m.feed, false); toast(String(e.message || e)); }
@@ -883,7 +887,7 @@ async function handle(m) {
     case "remove":
       sources = sources.filter(s => s.id !== m.id);
       for (const id in articles) if (articles[id].src === m.id) delete articles[id];
-      saveAll(); return push();
+      saveAll(); saveWidget(widgetSnapshot()); return push();
     case "srccat": { const s = sources.find(x => x.id === m.id); if (s) s.catLock = CAT_IDS.includes(m.v) ? m.v : ""; saveAll(); return push(); }
     case "pause": { const s = sources.find(x => x.id === m.id); if (s) s.paused = !s.paused; saveAll(); return push(); }
     case "story": return storyAction(m);
@@ -965,24 +969,28 @@ async function handle(m) {
       if (m.k === "*") settings.cfg = {}; else setCfg(m.k, m.v);
       if (cfg("kwStrictness") !== before) Object.values(articles).forEach(classifyKw);
       if (m.k === "*" || m.k === "maxAgeDays" || m.k === "maxArticles") prune();
-      saveAll(); return push();
+      saveAll(); saveWidget(widgetSnapshot()); return push();
     }
     case "usagereset": usage = { since: Date.now(), p: {} }; write("usage", usage); toast("Usage counters reset"); return push();
   }
   saveAll();
+  if (m.type === "read" || m.type === "rate" || m.type === "markAll") saveWidget(widgetSnapshot());   // unread count, pick and rows change
 }
 
-wv.shouldAllowRequest = req => {
-  const u = req.url || "";
-  if (u.startsWith(SCHEME)) {
-    let m = {};
-    try { m = JSON.parse(decodeURIComponent(u.split("?d=")[1] || "%7B%7D")); } catch (e) {}
-    handle(m).catch(e => toast(String(e.message || e)));
-    return false;
-  }
-  if (/^https?:/i.test(u)) { Safari.openInApp(u, false); return false; }
-  return true;
-};
+function buildWebView() {
+  wv = new WebView();
+  wv.shouldAllowRequest = req => {
+    const u = req.url || "";
+    if (u.startsWith(SCHEME)) {
+      let m = {};
+      try { m = JSON.parse(decodeURIComponent(u.split("?d=")[1] || "%7B%7D")); } catch (e) {}
+      handle(m).catch(e => toast(String(e.message || e)));
+      return false;
+    }
+    if (/^https?:/i.test(u)) { Safari.openInApp(u, false); return false; }
+    return true;
+  };
+}
 
 function clientApp() {
   let S = window.__INIT;
@@ -2477,23 +2485,10 @@ window.__INIT = ${safeJSON(clientState())};
 (${clientApp.toString()})();</script>
 </body></html>`;
 
-// ---------- home-screen widget ----------
-function wcol(key) {
-  if (PALETTES[settings.theme]) return new Color(PALETTES[settings.theme][key]);
-  return Color.dynamic(new Color(PALETTES.ink[key]), new Color(PALETTES.night[key]));
-}
+// ---------- home-screen widget: BlogPulse's content for the shared frame below ----------
 function latestStory() {
   const st = Object.values(stories).sort((a, b) => b.at - a.at)[0];
   return st && Date.now() - st.at < cfg("widgetStoryHours") * 3600e3 ? st : null;
-}
-function staticSummary(fresh, unread) {
-  const base = fresh.length ? fresh : unread;
-  if (!base.length) return "You're all caught up.";
-  const by = {};
-  base.forEach(a => by[a.src] = (by[a.src] || 0) + 1);
-  const names = Object.entries(by).sort((x, y) => y[1] - x[1]).map(([id]) => (sources.find(s => s.id === id) || {}).title).filter(Boolean);
-  const who = names.length > 2 ? `${names.slice(0, 2).join(", ")} and ${names.length - 2} more` : names.join(" and ");
-  return `${base.length} ${fresh.length ? "new" : "unread"} post${base.length > 1 ? "s" : ""} from ${who}.`;
 }
 function topPick(list, unread, fresh) {
   const pk = computePicks(list, cfg("picksMinRatings"), cfg("picksThreshold"));
@@ -2506,80 +2501,307 @@ function topPick(list, unread, fresh) {
   if (unread[0]) return { a: unread[0], why: "Newest unread" };
   return null;
 }
-async function runWidget() {
-  if (sources.length && Date.now() - (settings.lastScan || 0) > cfg("widgetScanAfterMin") * 60e3) {
-    await Promise.race([scanAll(() => {}).catch(() => {}), new Promise(r => Timer.schedule(cfg("widgetScanBudget") * 1000, false, r))]);
-    saveAll(false);   // don't touch "last visit", so new posts stay new in the app
-  }
-  const fam = config.widgetFamily || "medium";
-  const small = fam === "small", large = fam === "large" || fam === "extraLarge";
+// The snapshot the widget reads (saveWidget): counts, the top pick, the stored ✦ story line and a few unread posts,
+// as titles, blog names and links only. Saved after scans, reads, Mark all read, ratings, blog changes and a new story.
+// "New" means first seen after BlogPulse was last open (settings.lastSession), as before 1.8.0.
+function widgetSnapshot() {
   const list = Object.values(articles).sort((a, b) => b.pub - a.pub);
   const unread = list.filter(a => !a.read);
-  const fresh = unread.filter(a => !a.seeded && a.seen > prevSession);
+  const fresh = unread.filter(a => !a.seeded && a.seen > (settings.lastSession || 0));
   const pick = topPick(list, unread, fresh);
-  const st = latestStory();
-  const srcTitle = a => (sources.find(s => s.id === a.src) || {}).title || "";
-  const txt = (stack, str, font, color, lines) => { const t = stack.addText(str); t.font = font; t.textColor = wcol(color); if (lines) t.lineLimit = lines; return t; };
-
-  const w = new ListWidget();
-  w.backgroundColor = wcol("paper");
-  w.setPadding(14, 16, 14, 16);
-  w.refreshAfterDate = new Date(Date.now() + cfg("widgetRefreshMin") * 60e3);
-  w.url = small && pick ? pick.a.link : URLScheme.forRunningScript();
-
-  const hd = w.addStack(); hd.centerAlignContent();
-  txt(hd, "BlogPulse", Font.boldSystemFont(small ? 13 : 15), "ink");
-  hd.addSpacer();
-  txt(hd, fresh.length ? `${fresh.length} new` : `${unread.length} unread`, Font.semiboldSystemFont(12), "signal");
-  w.addSpacer(small ? 6 : 5);
-
-  if (!sources.length) {
-    txt(w, "Open BlogPulse to follow your first blogs.", Font.systemFont(13), "ink2");
-  } else {
-    if (!small) {
-      const row = w.addStack(); row.spacing = 4;
-      if (st) txt(row, "✦", Font.boldSystemFont(12), "signal");
-      txt(row, st ? (st.dek || st.headline) : staticSummary(fresh, unread), Font.systemFont(12.5), "ink2", large ? 4 : 2);
-      w.addSpacer(large ? 12 : 8);
-    }
-    if (pick) {
-      const ps = w.addStack(); ps.layoutVertically(); ps.spacing = 2;
-      if (!small) ps.url = pick.a.link;
-      txt(ps, small ? "Top pick" : pick.why, Font.semiboldSystemFont(11), "amber");
-      txt(ps, pick.a.title, Font.semiboldSystemFont(small ? 13 : 15), "ink", small ? 4 : 2);
-      txt(ps, srcTitle(pick.a), Font.systemFont(11), "muted", 1);
-      if (large) {
-        const d = (pick.a.tldr && pick.a.tldr.lead) || pick.a.ai || pick.a.desc;
-        if (d) { ps.addSpacer(3); txt(ps, d, Font.systemFont(13), "ink2", 3); }
-      }
-    } else txt(w, "You're all caught up.", Font.systemFont(13), "ink2");
-    if (large) {
-      const more = unread.filter(a => !pick || a.id !== pick.a.id).slice(0, 4);
-      if (more.length) {
-        w.addSpacer(12);
-        txt(w, "Also unread", Font.semiboldSystemFont(11), "muted");
-        for (const a of more) {
-          w.addSpacer(5);
-          const r = w.addStack(); r.layoutVertically(); r.url = a.link;
-          txt(r, a.title, Font.mediumSystemFont(13), "ink", 1);
-          txt(r, srcTitle(a), Font.systemFont(10.5), "muted", 1);
-        }
-      }
-    }
+  const st = Object.values(stories).sort((a, b) => b.at - a.at)[0];
+  const post = a => ({ title: a.title, blog: (sources.find(s => s.id === a.src) || {}).title || hostOf(a.link), link: a.link || "" });
+  return {
+    blogs: sources.length, unread: unread.length, fresh: fresh.length, scanned: settings.lastScan || 0,
+    pick: pick ? Object.assign(post(pick.a), { why: pick.why }) : null,
+    story: st && (st.dek || st.headline) ? { text: st.dek || st.headline, at: st.at } : null,
+    posts: unread.filter(a => !pick || a.id !== pick.a.id).slice(0, 6).map(post),
+  };
+}
+// The widget's content (app-blueprints · widgets, Step 7). As before 1.8.0, the widget checks the blogs itself when the
+// last check is older than "widgetScanAfterMin", within "widgetScanBudget"; otherwise, or when the budget runs out, it
+// shows the saved snapshot. The scan stays in memory: a widget run writes only the widget snapshot, never BlogPulse's files.
+// The ✦ line is the story already written in the app; the widget never calls AI.
+async function widgetModel() {
+  let d = readWidget();
+  const last = Math.max(settings.lastScan || 0, (d && d.scanned) || 0);
+  if (sources.length && Date.now() - last > cfg("widgetScanAfterMin") * 60e3) {
+    const done = await Promise.race([
+      scanAll(() => {}).then(() => true, () => false),
+      new Promise(r => Timer.schedule(cfg("widgetScanBudget") * 1000, false, () => r(false))),
+    ]);
+    if (done) { d = widgetSnapshot(); saveWidget(d); }
   }
+  if (!d) d = widgetSnapshot();   // no snapshot yet (first run after updating): from BlogPulse's own files, read only
+  if (!d.blogs) return { empty: "Open BlogPulse to follow your first blogs." };
+  const story = d.story && Date.now() - d.story.at < cfg("widgetStoryHours") * 3600e3 ? [{ icon: "✦", text: d.story.text, lines: 3 }] : [];
+  const rows = story.concat((d.posts || []).map(p => ({ text: p.title, sub: p.blog, url: p.link })));
+  const footer = d.scanned ? "Scanned " + wWhen(d.scanned) : "";
+  if (!d.pick) {
+    return { kicker: "All caught up", title: "Nothing unread", caption: "Following " + d.blogs + (d.blogs === 1 ? " blog" : " blogs"), rows, footer, at: d.scanned };
+  }
+  return {
+    badge: d.fresh ? d.fresh + " new" : d.unread + " unread",
+    kicker: d.pick.why,
+    title: d.pick.title,
+    caption: d.pick.blog,
+    rows,
+    footer,
+    at: d.scanned,
+  };
+}
+
+// ───────── Widget ─────────
+// Shared widget frame (github.com/gadominas/app-blueprints › blueprints/widgets.md).
+// An app changes only WIDGET and widgetModel(); everything below WB is the same in every app.
+const WIDGET = {
+  name: ['Blog', 'Pulse'],                // as on the launch screen: plain part, highlighted part, optional rest
+  accent: '#A78BFA',                      // the logo's focal colour (the launch screen's --sp-accent)
+  icon: REPO_RAW + 'docs/icon-1024.png',  // the app icon, cached on the phone after the first fetch
+  words: { open: 'Tap to open', nothing: 'Nothing to show yet.', updated: 'Updated', yesterday: 'yesterday' },   // in the app's language
+};
+// Brand colours, the same in every app and in light and dark mode: the logo tile's ground and lines.
+const WB = { ground: '#0E1116', raised: '#171B22', ink: '#F6F7F9', ink2: '#C9CED6', muted: '#9AA3AE', good: '#2DD4BF', warn: '#FBBF24' };
+const wfm = FileManager.local();
+const wPath = (n) => wfm.joinPath(wfm.documentsDirectory(), APP_ID + '-' + n);
+
+// What the widget shows is saved by the app and only read by the widget: fast, offline, no sign-in.
+function saveWidget(data) {
+  try { wfm.writeString(wPath('widget.json'), JSON.stringify(Object.assign({}, data, { at: Date.now() }))); }
+  catch (e) { console.log('Widget: not saved: ' + e); }
+}
+function readWidget() {
+  try { const p = wPath('widget.json'); return wfm.fileExists(p) ? JSON.parse(wfm.readString(p)) : null; }
+  catch (e) { return null; }
+}
+
+// Tones: ink, soft, muted, accent, good, warn, or a hex colour.
+const wColor = (c, a = 1) => {
+  const k = c === 'soft' ? 'ink2' : c;
+  return new Color(k === 'accent' ? WIDGET.accent : (WB[k] || k), a);
+};
+// Rounded system fonts, falling back to the plain system font on older Scriptable versions.
+function wFont(weight, size) {
+  const name = { bold: 'boldRoundedSystemFont', semi: 'semiboldRoundedSystemFont', med: 'mediumRoundedSystemFont' }[weight] || 'regularRoundedSystemFont';
+  if (typeof Font[name] === 'function') return Font[name](size);
+  return weight === 'bold' ? Font.boldSystemFont(size) : weight === 'semi' ? Font.semiboldSystemFont(size) : weight === 'med' ? Font.mediumSystemFont(size) : Font.systemFont(size);
+}
+function wText(stack, s, size, weight, tone, lines = 1) {
+  const t = stack.addText(String(s));
+  t.font = wFont(weight, size);
+  t.textColor = wColor(tone);
+  t.lineLimit = lines;
+  if (lines === 1) t.minimumScaleFactor = 0.75;
+  return t;
+}
+function wWhen(ts) {
+  const d = new Date(ts), now = new Date(), f = new DateFormatter();
+  const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const ago = Math.round((day(now) - day(d)) / 864e5);
+  if (ago === 1) return WIDGET.words.yesterday;
+  f.dateFormat = ago === 0 ? 'HH:mm' : 'd MMM';
+  return f.string(d);
+}
+
+// The app's logo tile, from the repository's icon, cached per app version; a monogram until then.
+async function widgetIcon() {
+  const p = wPath('widget-icon-' + VERSION + '.png');
+  try {
+    if (wfm.fileExists(p)) return wfm.readImage(p);
+    const r = new Request(WIDGET.icon);
+    r.timeoutInterval = 8;
+    const dc = new DrawContext();
+    dc.size = new Size(96, 96); dc.opaque = false; dc.respectScreenScale = false;
+    dc.drawImageInRect(await r.loadImage(), new Rect(0, 0, 96, 96));
+    const img = dc.getImage();
+    const dir = wfm.documentsDirectory();
+    wfm.listContents(dir).filter((f) => f.startsWith(APP_ID + '-widget-icon-')).forEach((f) => { try { wfm.remove(wfm.joinPath(dir, f)); } catch (e) {} });
+    wfm.writeImage(p, img);
+    return img;
+  } catch (e) {
+    return widgetMonogram();
+  }
+}
+function widgetMonogram() {
+  const dc = new DrawContext();
+  dc.size = new Size(96, 96); dc.opaque = false; dc.respectScreenScale = false;
+  dc.setFillColor(wColor('raised')); dc.fillRect(new Rect(0, 0, 96, 96));
+  dc.setFont(wFont('bold', 54)); dc.setTextColor(wColor('accent')); dc.setTextAlignedCenter();
+  dc.drawTextInRect(WIDGET.name.join('').charAt(0), new Rect(0, 14, 96, 70));
+  return dc.getImage();
+}
+
+// Rows that fit: a line counts 1, a sub line 0.8; medium holds 5.5 (3 rows at most), large 12 (6 at most).
+function wFit(rows, budget, max) {
+  const out = [];
+  let used = 0;
+  for (const r of rows || []) {
+    const n = (r.lines || 1) + (r.sub ? 0.8 : 0);
+    if (out.length >= max || used + n > budget + 1e-9) break;   // 1e-9: 3 + 5 × 1.8 must still fit in 12
+    used += n;
+    out.push(r);
+  }
+  return out;
+}
+function wRows(stack, rows) {
+  rows.forEach((r, i) => {
+    if (i) stack.addSpacer(5);
+    const row = stack.addStack();
+    row.topAlignContent(); row.spacing = 6;
+    if (r.url) row.url = r.url;
+    if (r.icon) { const ic = row.addStack(); ic.size = new Size(15, 0); wText(ic, r.icon, 11.5, 'reg', 'ink'); }
+    const tx = row.addStack();
+    tx.layoutVertically();
+    wText(tx, r.text, 12.5, r.lines ? 'reg' : 'med', r.tone || (r.lines ? 'soft' : 'ink'), r.lines || 1);
+    if (r.sub) wText(tx, r.sub, 11, 'reg', 'muted');
+  });
+}
+
+async function renderWidget(m) {
+  const fam = config.widgetFamily || 'medium';
+  const w = new ListWidget();
+  w.url = m.url || URLScheme.forRunningScript();
+  w.refreshAfterDate = new Date(Date.now() + cfg('widgetRefreshMin') * 60e3);
+  if (fam.startsWith('accessory')) return renderAccessory(w, fam, m);
+  const small = fam === 'small', medium = fam === 'medium', large = !small && !medium;
+  const g = new LinearGradient();
+  g.colors = [wColor('raised'), wColor('ground')]; g.locations = [0, 1];
+  g.startPoint = new Point(0, 0); g.endPoint = new Point(0, 1);
+  w.backgroundGradient = g;
+  w.setPadding(14, 14, 14, 14);
+
+  // 1. Header: logo tile, name (highlighted part in the accent), badge
+  const hd = w.addStack();
+  hd.centerAlignContent();
+  const icon = hd.addImage(await widgetIcon());
+  const is = small ? 18 : 20;
+  icon.imageSize = new Size(is, is); icon.cornerRadius = is * 0.225;
+  hd.addSpacer(6);
+  WIDGET.name.forEach((part, i) => {
+    if (!part) return;
+    const t = hd.addText(part);
+    t.font = wFont('bold', small ? 13 : 14); t.textColor = wColor(i === 1 ? 'accent' : 'ink'); t.lineLimit = 1;
+  });
+  hd.addSpacer();
+  if (m.badge && !small) {
+    const b = hd.addStack();
+    b.setPadding(2, 7, 2, 7); b.cornerRadius = 8;
+    b.backgroundColor = wColor(m.badgeTone || 'accent', 0.16);
+    wText(b, m.badge, 11.5, 'semi', m.badgeTone || 'accent');
+  }
+  w.addSpacer(small ? 8 : 10);
+
+  // Empty state: what to do next, never an error
+  if (m.empty) {
+    wText(w, m.empty, 13, 'semi', 'soft', 3);
+    w.addSpacer();
+    wText(w, m.footer || WIDGET.words.open, 11, 'reg', 'muted');
+    Script.setWidget(w);
+    return;
+  }
+
+  // 2. Hero: kicker, then a big value with its caption, or a title with its caption
+  const body = w.addStack();
+  body.topAlignContent();
+  const left = body.addStack();
+  left.layoutVertically();
+  if (medium) left.size = new Size(136, 0);
+  if (m.kicker) wText(left, m.kicker, 11, 'semi', m.kickerTone || 'accent');
+  if (m.value != null && m.value !== '') {
+    wText(left, m.value, small ? 40 : 42, 'bold', m.valueTone || 'ink');
+    if (m.caption) wText(left, m.caption, 13, 'semi', 'ink');
+  } else {
+    if (m.title) wText(left, m.title, small ? 16 : 18, 'bold', 'ink', 2);
+    if (m.caption) { left.addSpacer(2); wText(left, m.caption, 12, 'reg', 'soft', 2); }
+  }
+
+  // 3. Rows: beside the hero on medium, under it on large, none on small
+  const rows = m.rows || [];
+  if (medium && wFit(rows, 5.5, 3).length) {
+    body.addSpacer(12);
+    const right = body.addStack();
+    right.layoutVertically();
+    wRows(right, wFit(rows, 5.5, 3));
+  }
+  body.addSpacer();
+  if (large && wFit(rows, 12, 6).length) { w.addSpacer(14); wRows(w, wFit(rows, 12, 6)); }
+
+  // 4. Footer: one muted line; amber when the data is stale. Small shows the badge here if there's no footer.
   w.addSpacer();
+  const ft = small ? (m.footer || m.badge) : m.footer;
+  if (ft) wText(w, (m.stale ? '⟳ ' : '') + ft, 11, 'reg', m.stale ? 'warn' : 'muted');
   Script.setWidget(w);
 }
 
+// Lock Screen: iOS tints these, so text only, no colours or logo.
+function renderAccessory(w, fam, m) {
+  const name = WIDGET.name.join('');
+  const a = m.accessory || {};
+  const hasValue = m.value != null && m.value !== '';
+  const hero = m.empty || (hasValue ? (m.value + ' ' + (m.caption || '')).trim() : (m.title || ''));
+  if (fam === 'accessoryInline') {
+    w.addText(a.inline || (hero ? name + ': ' + hero : name));
+  } else if (fam === 'accessoryCircular') {
+    w.addAccessoryWidgetBackground = true;
+    const c = w.addStack();
+    c.layoutVertically(); c.centerAlignContent();
+    const gl = c.addText(a.glyph || name.charAt(0)); gl.font = Font.systemFont(11); gl.centerAlignText();
+    const v = c.addText(String(a.value != null ? a.value : hasValue ? m.value : '–'));
+    v.font = wFont('bold', 20); v.minimumScaleFactor = 0.5; v.centerAlignText();
+  } else {
+    const lines = [
+      [[name, m.badge || m.kicker].filter(Boolean).join(' · '), 'semi', 12],
+      [hero, 'bold', 15],
+      [m.empty ? '' : hasValue ? (m.footer || '') : (m.caption || m.footer || ''), 'reg', 12],
+    ];
+    lines.forEach(([s, wt, size]) => { if (!s) return; const t = w.addText(s); t.font = wFont(wt, size); t.lineLimit = 1; t.minimumScaleFactor = 0.7; });
+  }
+  Script.setWidget(w);
+}
+
+// Widget runs come here and only here: no WebView, Alert or QuickLook may be built or presented.
+async function runWidget() {
+  const name = WIDGET.name.join('');
+  let m = null;
+  try { m = await widgetModel(args.widgetParameter || '', config.widgetFamily || 'medium'); }
+  catch (e) { console.error('Widget model: ' + e); }
+  if (!m) m = { empty: WIDGET.words.nothing };
+  try {
+    if (m.at && !m.empty && Date.now() - m.at > cfg('widgetStaleMin') * 60e3) {
+      m.stale = true;
+      m.footer = WIDGET.words.updated + ' ' + wWhen(m.at);
+    }
+    await renderWidget(m);
+  } catch (e) {
+    console.error('Widget render: ' + e);
+    const w = new ListWidget();
+    w.backgroundColor = wColor('ground');
+    w.url = URLScheme.forRunningScript();
+    wText(w, name, 14, 'bold', 'ink');
+    w.addSpacer(4);
+    wText(w, WIDGET.words.open, 12, 'reg', 'muted');
+    Script.setWidget(w);
+  }
+}
+// ───────── end of Widget ─────────
+
 // ---------- run ----------
-if (config.runsInWidget) {
-  await runWidget();
-} else {
+async function main() {
+  buildWebView();
   await wv.loadHTML(buildHTML());
   const presented = wv.present(true);
   if (!updateChecked) { updateChecked = true; checkForUpdate().then(u => { pendingUpdate = u; offerUpdate(); }); }
   if (sources.length) runScan().catch(e => toast(String(e.message || e)));
   await presented;
   saveAll();
+  saveWidget(widgetSnapshot());   // leaving BlogPulse: nothing is "new" for the widget any more
+}
+
+// Settings are loaded at the top of the script (load("settings")), before every branch: app and widget runs both use the saved choices.
+if (config.runsInWidget || config.runsInAccessoryWidget) {
+  await runWidget();             // never builds or presents a WebView, Alert or QuickLook
+} else {
+  widgetIcon();                  // caches the logo tile for the widget, in the background
+  await main();
 }
 Script.complete();
