@@ -2,6 +2,23 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.9.1 (2026-10-29): Opens every time
+
+- 🔓 **Always opens**: A stuck earlier run can no longer stop BlogPulse from opening.
+- ☁️ **Patient with iCloud**: If iCloud is slow, BlogPulse opens with what it has and saves nothing over your data.
+- 🩺 **Says what's wrong**: If opening ever stalls, the screen shows what BlogPulse was waiting for.
+
+**Changes**
+
+- A new run waits at most 1.5 s for an older window, then opens anyway
+- Reading each data file from iCloud gives up after 10 s instead of waiting forever; files that weren't read are never saved over
+- Posts are handed to the page in pieces, each with a time limit
+- A short start-up log is kept on the phone and shown if opening fails
+
+**Fixes**
+
+- 1.9.0 could refuse to open after a run that got stuck, showing nothing
+
 ## 1.9.0 (2026-10-29): Opens straight away
 
 - ⚡ **No more black screen**: BlogPulse shows its launch screen at once and loads your posts behind it.

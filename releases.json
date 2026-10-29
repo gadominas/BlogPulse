@@ -4,6 +4,37 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.9.1",
+      "date": "2026-10-29",
+      "title": "Opens every time",
+      "highlights": [
+        {
+          "icon": "🔓",
+          "title": "Always opens",
+          "text": "A stuck earlier run can no longer stop BlogPulse from opening."
+        },
+        {
+          "icon": "☁️",
+          "title": "Patient with iCloud",
+          "text": "If iCloud is slow, BlogPulse opens with what it has and saves nothing over your data."
+        },
+        {
+          "icon": "🩺",
+          "title": "Says what's wrong",
+          "text": "If opening ever stalls, the screen shows what BlogPulse was waiting for."
+        }
+      ],
+      "changes": [
+        "A new run waits at most 1.5 s for an older window, then opens anyway",
+        "Reading each data file from iCloud gives up after 10 s instead of waiting forever; files that weren't read are never saved over",
+        "Posts are handed to the page in pieces, each with a time limit",
+        "A short start-up log is kept on the phone and shown if opening fails"
+      ],
+      "fixes": [
+        "1.9.0 could refuse to open after a run that got stuck, showing nothing"
+      ]
+    },
+    {
       "version": "1.9.0",
       "date": "2026-10-29",
       "title": "Opens straight away",
