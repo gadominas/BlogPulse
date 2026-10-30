@@ -2,6 +2,19 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.11.0 (2026-10-30): Read it later
+
+- 🔖 **Save for later**: Tap the bookmark on any post to keep it on your Read later list.
+- ✅ **Done when read**: Tap Done to mark a post read and take it off the list.
+- 🧹 **Clear finished**: Remove every saved post you've already read in one tap.
+
+**Changes**
+
+- Bookmark on every post, in all layouts; amber when saved
+- Read later tab with a count, newest saved first, grouped by the day you saved them; shows every saved post whatever topic or blog is selected
+- Done (or the circle in the Tiny layout) marks the post read and removes it from Read later; Clear finished removes all read ones
+- Saved posts are never removed for age and are kept first if posts are trimmed
+
 ## 1.10.0 (2026-10-30): Listen to whole articles
 
 - 🔊 **Listen on every post**: A Listen button reads the full article from the original page.
