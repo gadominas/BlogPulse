@@ -10,7 +10,7 @@ Every tech blog you care about, checked the moment you open it.<br>Sorted by top
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.9.2-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.10.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![License](https://img.shields.io/badge/license-MIT-15803d)](LICENSE)
@@ -149,7 +149,7 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | Mark as read | Tap **Mark read**, **Mark N read** next to a day to clear that day, or **Mark all read** at the top of the list to clear the page you're on, after a warning |
 | Rate | Tap one, two or three stars. Tap the same star again to clear it |
 | Read the Story | Open the **Story** tab and choose *Since last visit*, *Today* or *This week* |
-| Listen instead of reading | Tap **Listen** next to a day, **Listen to the story**, or **Listen** in a TL;DR. Pause, skip or stop from the player at the bottom |
+| Listen instead of reading | Tap **Listen** on a post to hear the full article, **Listen** next to a day for its summaries, **Listen to the story**, or **Listen** in a TL;DR. The player at the bottom shows progress and time left; tap the bar to jump, and pause, skip or stop |
 | Change the voice | **Settings › Listening**: choose **iPhone voice** or **✦ AI voice**, filter Female or Male, pick a voice, set speed, then **Test the voice** |
 | Invite someone to read | Open the TL;DR, tap **Invite to read**, add your instructions, then **Share…** |
 | Check for new posts | Pull the list down and hold until the ring fills, or tap refresh |

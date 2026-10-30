@@ -19,7 +19,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.9.2';
+const VERSION = '1.10.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -1401,6 +1401,13 @@ function clientApp() {
       if (my !== tts.token) return;
       tts.loading = false;
       au.onended = () => { if (my !== tts.token) return; part.audio = null; tts.i++; aiPlayPart(); };
+      au.ontimeupdate = () => {
+        if (my !== tts.token || !au.duration || !isFinite(au.duration)) return;
+        tts.pos = Math.round(part.t.length * au.currentTime / au.duration);
+        tts.cps = part.t.length / au.duration;   // this voice's speed, for the time-left estimate
+        renderProgress();
+      };
+      tts.pos = 0;
       au.src = "data:audio/mpeg;base64," + b64;
       if (!tts.paused) {
         const pr = au.play();
@@ -1428,6 +1435,8 @@ function clientApp() {
     tts.items = items; tts.label = label; tts.i = 0; tts.paused = false; tts.on = true;
     tts.parts = [];
     items.forEach((it, k) => (ai ? aiChunks : chunks)(it.text).forEach(t => tts.parts.push({ t, k })));
+    let acc = 0; tts.parts.forEach(p => { p.c0 = acc; acc += p.t.length; });
+    tts.total = acc; tts.pos = 0;
     if (!tts.parts.length) return stopSpeaking();
     playSoon();
   }
@@ -1440,7 +1449,8 @@ function clientApp() {
     u.rate = Number(S.settings.voiceRate) || 1; u.pitch = Number(S.settings.voicePitch) || 1;
     const next = () => { if (my !== tts.token) return; tts.i++; playPart(); };
     u.onend = next; u.onerror = e => { if (e.error !== "interrupted" && e.error !== "canceled") next(); };
-    SYN.speak(u); renderPlayer();
+    u.onboundary = e => { if (my !== tts.token) return; tts.pos = e.charIndex || 0; renderProgress(); };
+    tts.pos = 0; SYN.speak(u); renderPlayer();
   }
   function stopSpeaking(quiet) {
     tts.token++; tts.on = false; tts.paused = false; tts.loading = false; clearTimeout(tts.timer);
@@ -1463,6 +1473,29 @@ function clientApp() {
     tts.token++; if (tts.engine === "ai") { au.onended = null; au.pause(); } else SYN.cancel();
     tts.i = j; tts.paused = false; playSoon();
   }
+  function renderProgress() {
+    if (!tts.on || !tts.total) return;
+    const part = tts.parts[tts.i] || { c0: tts.total };
+    const done = Math.min(tts.total, part.c0 + (tts.pos || 0)), pct = done / tts.total;
+    $("#plBar").style.width = (pct * 100).toFixed(1) + "%";
+    const cps = (tts.engine === "ai" ? tts.cps || 14 : 15 * (Number(S.settings.voiceRate) || 1));   // characters per second
+    const left = Math.round((tts.total - done) / cps / 60);
+    $("#plTime").textContent = `${Math.round(pct * 100)}% — ${left < 1 ? "less than a minute" : "about " + left + " min"} left`;
+    $("#plProg").setAttribute("aria-valuenow", String(Math.round(pct * 100)));
+  }
+  function seekTo(f) {   // tap on the bar: jump to that sentence (or that second, within the piece playing)
+    if (!tts.on || !tts.total) return;
+    const target = Math.max(0, Math.min(tts.total - 1, f * tts.total));
+    const j = tts.parts.findIndex(p => target >= p.c0 && target < p.c0 + p.t.length);
+    if (j < 0) return;
+    const p = tts.parts[j];
+    if (tts.engine === "ai" && j === tts.i && au.duration && isFinite(au.duration)) {
+      au.currentTime = au.duration * (target - p.c0) / p.t.length; tts.pos = target - p.c0; renderProgress(); return;
+    }
+    tts.token++;
+    if (tts.engine === "ai") { au.onended = null; au.pause(); } else SYN.cancel();
+    tts.i = j; tts.pos = 0; tts.paused = false; playSoon(); renderProgress();
+  }
   function renderPlayer() {
     const pl = $("#player"), on = tts.on;
     pl.hidden = !on; document.body.classList.toggle("playing", on);
@@ -1476,6 +1509,7 @@ function clientApp() {
     $("#plPause").innerHTML = tts.paused ? PLAY_ICO : PAUSE_ICO;
     $("#plPause").setAttribute("aria-label", tts.paused ? "Resume" : "Pause");
     if (it.id) { const c = document.getElementById("c-" + it.id); if (c) c.classList.add("speaking"); }
+    renderProgress();
   }
   const PLAY_ICO = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`, PAUSE_ICO = `<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>`;
   const srcTitle = a => (srcMap()[a.src] || {}).title || "";
@@ -1493,7 +1527,7 @@ function clientApp() {
   window.onArticleText = (id, r) => {
     const a = byId(id); if (!a) return;
     if (r.error) return toast(r.error);
-    speak("Full article", [{ id, title: a.title, text: `${a.title}. From ${srcTitle(a)}. ${r.paras.join(" ")}` }]);
+    speak("Full article — " + srcTitle(a), [{ id, title: a.title, text: `${a.title}. From ${srcTitle(a)}. ${r.paras.join(" ")}` }]);
     if (r.partial) toast("The full page couldn't be read, so this is the excerpt");
   };
 
@@ -1606,7 +1640,7 @@ function clientApp() {
       <button class="tick" data-act="read" data-id="${a.id}" aria-label="${a.read ? "Mark unread" : "Mark read"}"></button>
       <div class="tmain" data-act="open" data-id="${a.id}"><h3>${a.pick ? `<span class="pk" aria-label="Pick for you">✦</span>` : ""}${esc(a.title)}</h3>
         <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span></div></div>
-      ${tlBtn(a, true)}
+      <button class="lsbtn mini" data-act="listenarticle" data-id="${a.id}" aria-label="Listen to the full article">${SPK}</button>${tlBtn(a, true)}
       <div class="stars mini ${a.rating ? "rated" : ""}">${stars}</div>${inlineTldr(a)}</article>`;
     return `<article class="${cls}" id="c-${a.id}">
       <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span></div>
@@ -1616,7 +1650,7 @@ function clientApp() {
       <div class="row">
         <div class="stars ${a.rating ? "rated" : ""}">${stars}</div>
         ${a.isNew && !a.read ? `<span class="flag new">New</span>` : ""}${a.pick ? `<span class="flag pick">✦ Pick</span>` : ""}
-        <span class="acts">${tlBtn(a)}<button class="readbtn" data-act="read" data-id="${a.id}">${a.read ? "Mark unread" : "Mark read"}</button></span>
+        <span class="acts"><button class="lsbtn" data-act="listenarticle" data-id="${a.id}" aria-label="Listen to the full article">${SPK}Listen</button>${tlBtn(a)}<button class="readbtn" data-act="read" data-id="${a.id}">${a.read ? "Mark unread" : "Mark read"}</button></span>
       </div>
     </article>`;
   }
@@ -1850,6 +1884,7 @@ function clientApp() {
       case "plpause": togglePause(); break;
       case "plnext": skipItem(); break;
       case "plstop": stopSpeaking(); break;
+      case "plseek": { const r = t.getBoundingClientRect(); seekTo((e.clientX - r.left) / Math.max(1, r.width)); break; }
       case "voiceset": {
         const k = t.dataset.k, val = k === "voiceGender" || k === "speechEngine" ? v : +v;
         if (k === "speechEngine" && tts.on) stopSpeaking();
@@ -2252,6 +2287,19 @@ button.srow.bp{width:100%;background:none;border:0;border-bottom:1px solid var(-
 .voicesel{display:block;width:100%;margin-top:8px;font:16px var(--sans);color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:9px;padding:9px 10px}
 #player{position:fixed;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom) + 10px);z-index:30;display:flex;align-items:center;gap:8px;padding:10px 10px 10px 14px;border-radius:16px;background:var(--ink);color:var(--paper);box-shadow:0 8px 28px rgba(0,0,0,.28)}
 #player[hidden]{display:none}
+#player{flex-wrap:wrap}
+.pl-foot{flex-basis:100%;display:flex;align-items:center;gap:10px;margin-top:2px}
+.pl-prog{flex:1;height:18px;display:flex;align-items:center;cursor:pointer;position:relative}
+.pl-prog::before{content:"";position:absolute;left:0;right:0;height:4px;border-radius:2px;background:rgba(127,127,127,.35)}
+.pl-prog i{position:relative;display:block;height:4px;width:0;border-radius:2px;background:var(--signal);transition:width .25s linear}
+#plTime{font-size:11.5px;opacity:.8;white-space:nowrap;font-variant-numeric:tabular-nums}
+body.playing #list{padding-bottom:120px}
+body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 112px)}
+.lsbtn{display:inline-flex;align-items:center;flex:none;min-height:32px;padding:4px 10px 4px 8px;border-radius:16px;background:var(--sheet);color:var(--ink-2);border:1.5px solid var(--rule);font-weight:700;font-size:calc(13px * var(--ts));white-space:nowrap}
+.lsbtn .ico{width:15px;height:15px;margin-right:4px}
+.lsbtn.mini{min-height:28px;padding:2px 7px}
+.lsbtn.mini .ico{margin-right:0}
+.lsbtn:active{transform:scale(.95)}
 .pl-info{flex:1;min-width:0}
 .pl-info b,.pl-info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pl-info b{font-size:14.5px}
@@ -2461,7 +2509,7 @@ textarea.cfgin.wide{resize:vertical}
   .splash *{animation:none!important;opacity:1!important;transform:none!important;stroke-dashoffset:0!important}
   .splash{animation:spOut .3s ease 1.6s forwards!important}
 }
-@media (prefers-reduced-motion: reduce){.eq i{animation:none;height:60%}#ptr{transition:none}.updp{animation:none}.busy-dot{animation-duration:2.4s}.tlbtn,.tlbtn .chev{transition:none}#top.busy .rf-spin svg,.ln{animation:none}.sheet,#toast,#bar{transition:none}}
+@media (prefers-reduced-motion: reduce){.pl-prog i{transition:none}.eq i{animation:none;height:60%}#ptr{transition:none}.updp{animation:none}.busy-dot{animation-duration:2.4s}.tlbtn,.tlbtn .chev{transition:none}#top.busy .rf-spin svg,.ln{animation:none}.sheet,#toast,#bar{transition:none}}
 `;
 
 // BlogPulse logo (pulse feed), drawn on its dark tile: header mark and the first-run screen
@@ -2517,6 +2565,7 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
   <button id="plPause" class="pl-btn" data-act="plpause" aria-label="Pause"></button>
   <button class="pl-btn" data-act="plnext" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M6 5l9 7-9 7zM16 5h3v14h-3z"/></svg></button>
   <button class="pl-btn" data-act="plstop" aria-label="Stop"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg></button>
+  <div class="pl-foot"><div id="plProg" class="pl-prog" data-act="plseek" role="progressbar" aria-label="Reading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="plBar"></i></div><span id="plTime"></span></div>
 </div>
 <div id="toast" role="status"></div>
 <script>
