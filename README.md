@@ -67,23 +67,27 @@ Every tech blog you care about, checked the moment you open it, sorted by topic,
 ## Install
 
 1. Get **[Scriptable](https://apps.apple.com/app/scriptable/id1405459188)** (free) on your iPhone or iPad.
-2. In Scriptable, tap **+**, paste the contents of [`Install BlogPulse.js`](Install%20BlogPulse.js), and tap **Run** (▶).
-3. Open **BlogPulse** from your Scripts list and follow your first blogs. A list of popular engineering blogs is waiting for you.
+2. In Scriptable, tap **+**, paste these two lines, name the script *BlogPulse Installer*, and tap **▶**:
+   ```js
+   const code = await new Request("https://raw.githubusercontent.com/gadominas/BlogPulse/main/install.js").loadString();
+   await eval("(async () => {" + code + "\n})()");
+   ```
+3. Tap **Open BlogPulse** and follow your first blogs. A list of popular engineering blogs is waiting for you.
 
-From then on BlogPulse tells you when a new version is out and updates itself with one tap. You can also run the installer again any time; your blogs, posts and settings are kept.
+To update, tap **Update now** when BlogPulse offers a new version, or run *BlogPulse Installer* again. Your blogs, posts and settings are kept.
 
 <details>
 <summary><b>Install by hand</b></summary>
 
-- **Download the file:** save [`BlogPulse.js`](BlogPulse.js) to **iCloud Drive › Scriptable**. It appears in Scriptable automatically.
-- **Copy and paste:** in Scriptable, tap **+**, paste the whole of `BlogPulse.js`, and name the script *BlogPulse*.
+Rather not use the loader? Paste [`install.js`](install.js) or [`BlogPulse.js`](BlogPulse.js) into a new script in Scriptable yourself.
 
 </details>
 
-You need nothing else: no computer, no account, no sign-up. Two optional extras take a minute each:
+What else you need:
 
-- **AI:** a [Claude](https://console.anthropic.com/settings/keys) or [OpenAI](https://platform.openai.com/api-keys) API key, added in **Settings › AI settings** (see [AI](#ai)). It switches on the Story, AI TL;DRs, automatic topics and AI-written invites.
-- **The widget:** see [Widget](#widget).
+- **Nothing else is required:** no computer, no account, no sign-up.
+- **Optional: AI.** A [Claude](https://console.anthropic.com/settings/keys) or [OpenAI](https://platform.openai.com/api-keys) API key, added in **Settings › AI settings** (see [AI](#ai)). It switches on the Story, AI TL;DRs, automatic topics and AI-written invites.
+- **Optional: the widget.** See [Widget](#widget).
 
 ## How to use it
 

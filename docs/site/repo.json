@@ -1,5 +1,27 @@
 {
   "description": "Scan. Read. Rate. A reader for the tech blogs you follow: checks them each time you open it, sorts posts into topics, and with your own Claude or OpenAI key writes a cited Story, TL;DRs and invites to read. A Scriptable app.",
   "homepage": "https://github.com/gadominas/BlogPulse#readme",
-  "topics": ["scriptable", "scriptable-app", "ios", "iphone", "javascript", "app-blueprints", "ai", "claude", "openai", "rss-reader", "rss", "atom", "feed-reader", "engineering-blogs", "summarization", "text-to-speech", "ios-widget"]
+  "topics": [
+    "scriptable",
+    "scriptable-app",
+    "ios",
+    "iphone",
+    "javascript",
+    "app-blueprints",
+    "ai",
+    "claude",
+    "openai",
+    "rss-reader",
+    "rss",
+    "atom",
+    "feed-reader",
+    "engineering-blogs",
+    "summarization",
+    "text-to-speech",
+    "ios-widget"
+  ],
+  "install": {
+    "kept": "Your blogs, posts and settings are kept.",
+    "firstRun": "Open it and follow your first blogs."
+  }
 }
