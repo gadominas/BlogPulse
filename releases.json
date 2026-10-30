@@ -4,6 +4,35 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.12.0",
+      "date": "2026-10-30",
+      "title": "See what AI can do",
+      "highlights": [
+        {
+          "icon": "✦",
+          "title": "Discover AI",
+          "text": "Without an AI key, a short card now and then shows what AI adds to BlogPulse."
+        },
+        {
+          "icon": "🔑",
+          "title": "Straight to setup",
+          "text": "Turn on AI opens AI settings with Add key highlighted: three steps and you're done."
+        },
+        {
+          "icon": "🤫",
+          "title": "Never pushy",
+          "text": "At most every few days, never over another screen, and Don't remind me again stops it for good."
+        }
+      ],
+      "changes": [
+        "AI invitation card, shown only while no Claude or OpenAI key is saved: one-line summaries on new posts, the Story and TL;DRs that say why a post matters",
+        "Appears after the launch screen and never on a launch that offers an update, over a sheet, the Mark all read dialog or while Listen is playing",
+        "Later (or a tap outside the card) brings it back in 3 days, in 7 days after the fourth time; removing your last key brings it back on the next launch",
+        "Settings › Built with lists the AI invitation blueprint"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.11.0",
       "date": "2026-10-30",
       "title": "Read it later",

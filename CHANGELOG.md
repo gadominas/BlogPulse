@@ -2,6 +2,19 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.12.0 (2026-10-30): See what AI can do
+
+- ✦ **Discover AI**: Without an AI key, a short card now and then shows what AI adds to BlogPulse.
+- 🔑 **Straight to setup**: Turn on AI opens AI settings with Add key highlighted: three steps and you're done.
+- 🤫 **Never pushy**: At most every few days, never over another screen, and Don't remind me again stops it for good.
+
+**Changes**
+
+- AI invitation card, shown only while no Claude or OpenAI key is saved: one-line summaries on new posts, the Story and TL;DRs that say why a post matters
+- Appears after the launch screen and never on a launch that offers an update, over a sheet, the Mark all read dialog or while Listen is playing
+- Later (or a tap outside the card) brings it back in 3 days, in 7 days after the fourth time; removing your last key brings it back on the next launch
+- Settings › Built with lists the AI invitation blueprint
+
 ## 1.11.0 (2026-10-30): Read it later
 
 - 🔖 **Save for later**: Tap the bookmark on any post to keep it on your Read later list.
