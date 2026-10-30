@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.12.0';
+const VERSION = '1.13.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -34,7 +34,7 @@ const KC_UPDATE_SNOOZE = 'blogpulse-update-snooze';
 const BLUEPRINTS_REPO = 'https://github.com/gadominas/app-blueprints';
 const BLUEPRINTS = [
   { id: 'in-app-updates', name: 'In-app updates', version: '1.0.0', since: '1.0.0' },
-  { id: 'settings', name: 'Settings', version: '1.0.0', since: '1.2.0' },
+  { id: 'settings', name: 'Settings', version: '1.1.0', since: '1.13.0' },
   { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.0.0' },
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.6.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.8.0' },
@@ -1149,6 +1149,20 @@ function clientApp() {
       <div class="aic-btns"><button class="sm" data-act="voicetest">${SPK}Test the voice</button><span class="note">${voices.length} voices on this ${/iPad/.test(navigator.userAgent) ? "iPad" : "iPhone"}</span></div>
       <p class="note">More natural voices: iOS Settings › Accessibility › Spoken Content › Voices. Download an Enhanced or Premium voice and it appears here.</p>`;
   }
+  // Settings blueprint 1.1.0: each section's rows in one card (.grp), built right after every render.
+  // A heading's explanation (p.hint right under it) and the changed-count footer (.cfg-foot) stay outside.
+  function cardSections(body) {
+    if (!body) return;
+    var inSec = false, grp = null, kids = Array.prototype.slice.call(body.children);
+    kids.forEach(function (n) {
+      var c = n.classList;
+      if (n.tagName === "H3" && c.contains("sec")) { inSec = true; grp = null; return; }
+      if (!inSec || c.contains("grp") || c.contains("cfg-foot")) { grp = null; return; }
+      if (!grp && n.tagName === "P" && c.contains("hint")) return;
+      if (!grp) { grp = document.createElement("div"); grp.className = "grp"; body.insertBefore(grp, n); }
+      grp.appendChild(n);
+    });
+  }
   function renderCfg() {
     const el = $("#cfgsheet"), keepTop = el.scrollTop;
     el.classList.toggle("open", cfgOpen); lockBody();
@@ -1186,6 +1200,7 @@ function clientApp() {
         ${changed ? `<button class="sm danger ${cfgArmed ? "armed" : ""}" data-act="cfgall">${cfgArmed ? "Confirm reset" : "Reset all"}</button>` : ""}</div>
       ${builtWithHTML()}
     </div>`;
+    cardSections(el.querySelector(".sh-body"));   // Settings 1.1.0: one card per section
     el.scrollTop = keepTop;
   }
   let aiOpen = false, aiArmed = null; const aiLoading = new Set();
@@ -2632,6 +2647,12 @@ body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 84px)}
 textarea.cfgin.wide{resize:vertical}
 .cfgin:focus{outline:2px solid var(--signal);outline-offset:-1px}
 .cfg-foot{margin-top:18px}
+/* Settings blueprint 1.1.0: sections are cards under small muted capitals */
+#cfgsheet h3.sec{font:700 calc(12.5px * var(--ts, 1))/1.2 var(--sans, -apple-system, system-ui, sans-serif);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:28px 4px 8px}
+#cfgsheet .grp{background:var(--sheet);border:1px solid var(--rule);border-radius:16px;padding:0 16px;overflow:hidden}
+#cfgsheet .grp>*:last-child{border-bottom:0}
+#cfgsheet .grp .lk-row{margin:0;padding:12px 0;border-bottom:1px solid var(--rule)}
+#cfgsheet .cfg-foot{margin:10px 4px 0}
 .aicard,.ucard{background:var(--sheet);border:1px solid var(--rule);border-radius:14px;padding:14px;margin:14px 0}
 .aicard.active{border-color:var(--signal);box-shadow:0 0 0 1px var(--signal)}
 .aic-h{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:calc(17px * var(--ts))}
