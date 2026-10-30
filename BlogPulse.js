@@ -19,7 +19,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.10.0';
+const VERSION = '1.11.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -468,8 +468,10 @@ function ingest(src, items, seeding) {
 
 function prune() {
   const cutoff = Date.now() - cfg("maxAgeDays") * DAY, ids = new Set(sources.map(s => s.id));
-  let list = Object.values(articles).filter(a => ids.has(a.src) && (a.rating || a.pub >= cutoff));
-  if (list.length > cfg("maxArticles")) list = list.sort((x, y) => (y.rating ? 1 : 0) - (x.rating ? 1 : 0) || y.pub - x.pub).slice(0, cfg("maxArticles"));
+  // Read later and rated posts are never dropped for age, and are kept first when trimming
+  let list = Object.values(articles).filter(a => ids.has(a.src) && (a.rating || a.pinned || a.pub >= cutoff));
+  const keepFirst = a => (a.pinned ? 2 : 0) + (a.rating ? 1 : 0);
+  if (list.length > cfg("maxArticles")) list = list.sort((x, y) => keepFirst(y) - keepFirst(x) || y.pub - x.pub).slice(0, cfg("maxArticles"));
   articles = Object.fromEntries(list.map(a => [a.id, a]));
 }
 
@@ -823,7 +825,7 @@ function clientState() {
   return {
     articles: list.map(a => ({
       id: a.id, src: a.src, title: a.title, link: a.link, desc: a.ai || a.desc || "", ai: !!a.ai, pub: a.pub,
-      read: !!a.read, rating: a.rating || 0, cat: catOf(a, defs), catBy: a.aiCat ? "ai" : "kw", isNew: !a.seeded && a.seen > prevSession, pick: pk.picks[a.id] || 0,
+      read: !!a.read, rating: a.rating || 0, pinned: a.pinned || 0, cat: catOf(a, defs), catBy: a.aiCat ? "ai" : "kw", isNew: !a.seeded && a.seen > prevSession, pick: pk.picks[a.id] || 0,
     })),
     sources: sources.map(s => ({ id: s.id, title: s.title, feed: s.feed, site: s.site, err: s.err || null, paused: !!s.paused, lastFetched: s.lastFetched || 0, cat: defs[s.id], catLock: s.catLock || "" })),
     ai: {
@@ -894,6 +896,8 @@ async function handle(m) {
   const a = m.id && articles[m.id];
   switch (m.type) {
     case "read": if (a) a.read = m.v ? 1 : 0; break;
+    case "pin": if (a) { if (m.v) a.pinned = Date.now(); else delete a.pinned; if (m.done) a.read = 1; } break;   // Read later
+    case "unpinRead": for (const id of m.ids || []) if (articles[id]) delete articles[id].pinned; break;
     case "rate": if (a) { a.rating = m.v || 0; if (a.rating) a.read = 1; }
       { const pk = computePicks(Object.values(articles), cfg("picksMinRatings"), cfg("picksThreshold")); call("onPicks", pk); } break;
     case "markAll": for (const id of m.ids || []) if (articles[id]) articles[id].read = 1; break;
@@ -1578,6 +1582,7 @@ function clientApp() {
   // ---- filtering ----
   const visible = a => !a.read || keep.has(a.id);
   function match(a) {
+    if (view === "later") return !!a.pinned;   // Read later shows every saved post, whatever topic or blog is selected
     if (!inCat(a)) return false;
     if (srcFilter && a.src !== srcFilter) return false;
     if (view === "unread") return visible(a);
@@ -1587,8 +1592,9 @@ function clientApp() {
     return true;
   }
   function counts() {
-    const c = { unread: 0, new: 0, picks: 0, rated: 0, all: 0 };
+    const c = { unread: 0, new: 0, picks: 0, rated: 0, all: 0, later: 0 };
     for (const a of S.articles) {
+      if (a.pinned) c.later++;
       if (!inCat(a) || (srcFilter && a.src !== srcFilter)) continue;
       c.all++; if (!a.read) c.unread++; if (a.isNew && !a.read) c.new++; if (a.pick && !a.read) c.picks++; if (a.rating) c.rated++;
     }
@@ -1596,7 +1602,7 @@ function clientApp() {
   }
 
   // ---- chrome ----
-  const TABS = () => (S.settings.hasKey ? [["story", "Story"]] : []).concat([["unread", "Unread"], ["new", "New"], ["picks", "Picks"], ["rated", "Rated"], ["all", "All"]]);
+  const TABS = () => (S.settings.hasKey ? [["story", "Story"]] : []).concat([["unread", "Unread"], ["new", "New"], ["later", "Read later"], ["picks", "Picks"], ["rated", "Rated"], ["all", "All"]]);
   function renderStatus() {
     const st = $("#status"), bar = $("#bar");
     st.textContent = progress ? `Checking ${progress[0]} of ${progress[1]} blogs…` : S.lastScan ? `Checked ${rel(S.lastScan)}` : "Not checked yet";
@@ -1616,7 +1622,7 @@ function clientApp() {
     const c = counts();
     $("#top").classList.toggle("storymode", view === "story");
     $("#tabs").innerHTML = TABS().map(([k, l]) =>
-      `<button class="tab ${k === "story" ? "story-tab" : ""} ${view === k ? "on" : ""}" data-act="view" data-v="${k}">${l}${c[k] && ["unread", "new", "picks"].includes(k) ? `<i>${c[k]}</i>` : ""}</button>`).join("");
+      `<button class="tab ${k === "story" ? "story-tab" : ""} ${view === k ? "on" : ""}" data-act="view" data-v="${k}">${l}${c[k] && ["unread", "new", "picks", "later"].includes(k) ? `<i>${c[k]}</i>` : ""}</button>`).join("");
     $("#grp").innerHTML = ["day", "week"].map(g => `<button class="${group === g ? "on" : ""}" data-act="group" data-v="${g}">${g === "day" ? "By day" : "By week"}</button>`).join("");
     const un = {};
     for (const a of S.articles) if (!a.read) un[a.src] = (un[a.src] || 0) + 1;
@@ -1637,20 +1643,21 @@ function clientApp() {
     const ctag = category === "all" ? `<span class="ctag" style="--c:${ci.color}" title="${a.catBy === "ai" ? "Category by AI" : "Category by keywords"}">${esc(ci.label)}</span>` : "";
     const cls = ["card", a.read ? "read" : "unread", a.isNew && !a.read ? "new" : "", a.pick ? "pick" : ""].join(" ");
     if (look.density === "tiny") return `<article class="${cls} tiny" id="c-${a.id}">
-      <button class="tick" data-act="read" data-id="${a.id}" aria-label="${a.read ? "Mark unread" : "Mark read"}"></button>
+      ${view === "later" ? `<button class="tick done" data-act="pindone" data-id="${a.id}" aria-label="Done — remove from Read later"></button>`
+        : `<button class="tick" data-act="read" data-id="${a.id}" aria-label="${a.read ? "Mark unread" : "Mark read"}"></button>`}
       <div class="tmain" data-act="open" data-id="${a.id}"><h3>${a.pick ? `<span class="pk" aria-label="Pick for you">✦</span>` : ""}${esc(a.title)}</h3>
-        <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span></div></div>
+        <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span>${pinBtn(a)}</div></div>
       <button class="lsbtn mini" data-act="listenarticle" data-id="${a.id}" aria-label="Listen to the full article">${SPK}</button>${tlBtn(a, true)}
       <div class="stars mini ${a.rating ? "rated" : ""}">${stars}</div>${inlineTldr(a)}</article>`;
     return `<article class="${cls}" id="c-${a.id}">
-      <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span></div>
+      <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span>${pinBtn(a)}</div>
       <h3 data-act="open" data-id="${a.id}">${esc(a.title)}</h3>
       ${a.desc ? `<p class="desc" data-act="open" data-id="${a.id}">${a.ai ? `<span class="ai">AI summary</span>` : ""}${esc(a.desc)}</p>` : ""}
       ${inlineTldr(a)}
       <div class="row">
         <div class="stars ${a.rating ? "rated" : ""}">${stars}</div>
         ${a.isNew && !a.read ? `<span class="flag new">New</span>` : ""}${a.pick ? `<span class="flag pick">✦ Pick</span>` : ""}
-        <span class="acts"><button class="lsbtn" data-act="listenarticle" data-id="${a.id}" aria-label="Listen to the full article">${SPK}Listen</button>${tlBtn(a)}<button class="readbtn" data-act="read" data-id="${a.id}">${a.read ? "Mark unread" : "Mark read"}</button></span>
+        <span class="acts"><button class="lsbtn" data-act="listenarticle" data-id="${a.id}" aria-label="Listen to the full article">${SPK}Listen</button>${tlBtn(a)}${view === "later" ? `<button class="readbtn done" data-act="pindone" data-id="${a.id}">Done</button>` : `<button class="readbtn" data-act="read" data-id="${a.id}">${a.read ? "Mark unread" : "Mark read"}</button>`}</span>
       </div>
     </article>`;
   }
@@ -1660,6 +1667,7 @@ function clientApp() {
       unread: ["You're all caught up", "New posts appear here after the next check."],
       new: ["Nothing new since your last visit", "Tap refresh to check again."],
       picks: S.picksReady ? ["No picks right now", "Picks are unread posts similar to the ones you rated ★★★."] : ["Picks learn from your ratings", `Rate at least 4 posts to switch Picks on. You've rated ${S.rated}.`],
+      later: ["Nothing saved for later", "Tap the bookmark on any post to keep it here until you've read it."],
       rated: ["No ratings yet", "Tap the stars under any post — ★★★ means you'd like more like it."],
       all: ["No posts yet", "Check your blogs with the refresh button."],
     }[view];
@@ -1668,21 +1676,26 @@ function clientApp() {
   function render() {
     applyLook(); renderStatus(); renderChrome();
     if (view === "story") return renderStory();
-    const list = S.articles.filter(match);
+    let list = S.articles.filter(match);
+    const later = view === "later";
+    if (later) list = list.slice().sort((x, y) => y.pinned - x.pinned);   // newest saved first, grouped by the day saved
     if (!list.length) { $("#list").innerHTML = emptyState(); return; }
     const sm = srcMap(); groupIdx = {};
     const groups = [];
     for (const a of list.slice(0, limit)) {
-      const k = keyOf(a.pub);
+      const k = keyOf(later ? a.pinned : a.pub);
       if (!groups.length || groups[groups.length - 1].k !== k) groups.push({ k, items: [] });
       groups[groups.length - 1].items.push(a);
     }
     groups.forEach(g => groupIdx[g.k] = g.items);
-    const toMark = markAllIds();
-    $("#list").innerHTML = (toMark.length ? `<div class="listbar"><span>${toMark.length} ${scopeName()}</span>
-      <button class="sm" data-act="markallask">${CHECK_ICO}Mark all read</button></div>` : "") + groups.map(g => {
+    const toMark = markAllIds(), finished = later ? list.filter(a => a.read).length : 0;
+    const bar = later
+      ? `<div class="listbar"><span>${list.length} saved — ${list.length - finished} to read</span>${finished ? `<button class="sm" data-act="clearfinished">${CHECK_ICO}Clear ${finished} finished</button>` : ""}</div>`
+      : toMark.length ? `<div class="listbar"><span>${toMark.length} ${scopeName()}</span>
+      <button class="sm" data-act="markallask">${CHECK_ICO}Mark all read</button></div>` : "";
+    $("#list").innerHTML = bar + groups.map(g => {
       const [big, small] = label(g.k), unread = g.items.filter(a => !a.read).length;
-      return `<section><header class="gh"><div><h2>${big}</h2><span>${esc(small)}</span></div>
+      return `<section><header class="gh"><div><h2>${later ? "Saved " + big.replace(/^This week|^Last week/, m => m.toLowerCase()) : big}</h2><span>${esc(small)}</span></div>
         <div class="gh-r"><span class="n">${g.items.length} post${g.items.length > 1 ? "s" : ""}</span><div class="gh-acts"><button class="gh-listen" data-act="listengroup" data-v="${g.k}" aria-label="Listen to ${esc(big)}">${SPK}Listen</button>${unread ? `<button data-act="markgroup" data-v="${g.k}">Mark ${unread} read</button>` : ""}</div></div></header>
         ${g.items.map(a => card(a, sm)).join("")}</section>`;
     }).join("") + (list.length > limit ? `<button class="more" data-act="more">Show ${Math.min(pageSize(), list.length - limit)} more</button>` : "");
@@ -1690,7 +1703,7 @@ function clientApp() {
   // "Mark all read": every unread post on this page (topic, blog and tab), after a warning
   const CHECK_ICO = `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5l5 5L20 6.5" fill="none"/></svg>`;
   function markAllIds() {
-    if (view === "story" || view === "rated") return [];
+    if (view === "story" || view === "rated" || view === "later") return [];
     return S.articles.filter(a => !a.read && inCat(a) && (!srcFilter || a.src === srcFilter)
       && (view !== "new" || a.isNew) && (view !== "picks" || a.pick)).map(a => a.id);
   }
@@ -1714,6 +1727,8 @@ function clientApp() {
     document.body.appendChild(ov);
     ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });   // outside = Cancel
   }
+  const PIN_ICO = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11a1 1 0 0 1 1 1v16l-6.5-4.2-6.5 4.2v-16a1 1 0 0 1 1-1z"/></svg>`;
+  const pinBtn = a => `<button class="pinbtn ${a.pinned ? "on" : ""}" data-act="pin" data-id="${a.id}" aria-pressed="${!!a.pinned}" aria-label="${a.pinned ? "Remove from Read later" : "Save for later"}">${PIN_ICO}</button>`;
   function refreshCard(a) {
     const el = document.getElementById("c-" + a.id);
     if (el) el.outerHTML = card(a, srcMap());
@@ -1940,6 +1955,17 @@ function clientApp() {
       case "group": group = v; send("set", { k: "groupBy", v }); render(); break;
       case "cat": setCat(v); break;
       case "chip": srcFilter = v || null; keep.clear(); render(); scrollTo(0, 0); break;
+      case "pin": {
+        a.pinned = a.pinned ? 0 : Date.now(); send("pin", { id, v: !!a.pinned });
+        toast(a.pinned ? "Saved to Read later" : "Removed from Read later");
+        if (view === "later") render(); else refreshCard(a);
+        break;
+      }
+      case "pindone": a.pinned = 0; a.read = true; send("pin", { id, v: false, done: true }); toast("Done — removed from Read later"); render(); break;
+      case "clearfinished": {
+        const ids = S.articles.filter(x => x.pinned && x.read).map(x => { x.pinned = 0; return x.id; });
+        send("unpinRead", { ids }); toast(`${ids.length} finished post${ids.length === 1 ? "" : "s"} cleared`); render(); break;
+      }
       case "markallask": confirmMarkAll(); break;
       case "markallcancel": { const cf = document.getElementById("confirm"); if (cf) cf.remove(); break; }
       case "markallgo": {
@@ -2295,6 +2321,13 @@ button.srow.bp{width:100%;background:none;border:0;border-bottom:1px solid var(-
 #plTime{font-size:11.5px;opacity:.8;white-space:nowrap;font-variant-numeric:tabular-nums}
 body.playing #list{padding-bottom:120px}
 body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 112px)}
+.pinbtn{flex:none;width:30px;height:26px;margin:-4px -6px -4px 2px;display:grid;place-items:center;color:var(--muted)}
+.pinbtn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round}
+.pinbtn.on{color:var(--amber)}
+.pinbtn.on svg{fill:currentColor}
+.pinbtn:active{transform:scale(.9)}
+.readbtn.done{color:var(--signal);font-weight:700}
+.tick.done::after{width:16px;height:16px;border-radius:8px;background:transparent;box-shadow:inset 0 0 0 2px var(--signal)}
 .lsbtn{display:inline-flex;align-items:center;flex:none;min-height:32px;padding:4px 10px 4px 8px;border-radius:16px;background:var(--sheet);color:var(--ink-2);border:1.5px solid var(--rule);font-weight:700;font-size:calc(13px * var(--ts));white-space:nowrap}
 .lsbtn .ico{width:15px;height:15px;margin-right:4px}
 .lsbtn.mini{min-height:28px;padding:2px 7px}
