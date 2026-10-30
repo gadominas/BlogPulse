@@ -4,6 +4,34 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.10.0",
+      "date": "2026-10-30",
+      "title": "Listen to whole articles",
+      "highlights": [
+        {
+          "icon": "🔊",
+          "title": "Listen on every post",
+          "text": "A Listen button reads the full article from the original page."
+        },
+        {
+          "icon": "📊",
+          "title": "Progress as you listen",
+          "text": "See how far along you are and roughly how many minutes are left."
+        },
+        {
+          "icon": "👆",
+          "title": "Tap to jump",
+          "text": "Tap anywhere on the progress bar to skip ahead or go back."
+        }
+      ],
+      "changes": [
+        "Listen button on every post (icon only in the Tiny layout) that reads the full article; falls back to the blog's excerpt if the page can't be read",
+        "Progress bar in the player with percentage and time left, using your speed setting or the AI voice's real pace",
+        "Tap the bar to jump: iPhone voices restart from that sentence, the AI voice jumps to that second within the current piece"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.9.2",
       "date": "2026-10-29",
       "title": "No more black screen",

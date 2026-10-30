@@ -2,6 +2,18 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.10.0 (2026-10-30): Listen to whole articles
+
+- 🔊 **Listen on every post**: A Listen button reads the full article from the original page.
+- 📊 **Progress as you listen**: See how far along you are and roughly how many minutes are left.
+- 👆 **Tap to jump**: Tap anywhere on the progress bar to skip ahead or go back.
+
+**Changes**
+
+- Listen button on every post (icon only in the Tiny layout) that reads the full article; falls back to the blog's excerpt if the page can't be read
+- Progress bar in the player with percentage and time left, using your speed setting or the AI voice's real pace
+- Tap the bar to jump: iPhone voices restart from that sentence, the AI voice jumps to that second within the current piece
+
 ## 1.9.2 (2026-10-29): No more black screen
 
 - 🖥 **Drawn on screen**: BlogPulse now builds its page while the window is visible, so iOS draws it.
