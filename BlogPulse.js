@@ -20,13 +20,22 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.13.0';
+const VERSION = '1.14.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
 // No snooze: "Later" only hides the offer until BlogPulse is opened again.
 // Up to 1.4.0 "Later" (or a tap outside the sheet) hid it for 2 days under this Keychain key; it's cleared at start.
 const KC_UPDATE_SNOOZE = 'blogpulse-update-snooze';
+
+// ── Anonymous usage counts (opt-in), sent to PostHog (app-blueprints · usage-analytics) ──
+// Nothing is sent until KEY is filled in AND the person agrees. Each event carries a random install ID
+// (made on this iPhone, not linked to any account), the app version and counts: never names, IDs from
+// other services, text, photos or anything the app read. Events are anonymous (no person profiles).
+// The key is PostHog's project key, made to sit in public apps: it can only add events.
+// HOST must be the region the project lives in: PostHog's other region answers "accepted" and then drops the events.
+const USAGE = { HOST: 'https://us.i.posthog.com', KEY: 'phc_yAi2PxJCRioWEKLF3uockdCf3QvyQdNABivwqpE4NCWR' };   // the shared project
+const KC_INSTALL = 'blogpulse-install-id';
 
 // ───────── Blueprints ─────────
 // Shared blueprints this app was built with (github.com/gadominas/app-blueprints). One line per blueprint, in this exact shape:
@@ -39,6 +48,7 @@ const BLUEPRINTS = [
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.6.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.8.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.12.0' },
+  { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.14.0' },
 ];
 
 // ---------- config ----------
@@ -374,6 +384,7 @@ async function loadData() {
 const settings = Object.assign(
   { groupBy: "day", view: "unread", readOnOpen: false, ai: true, aiProvider: "anthropic", lastSession: 0, lastScan: 0,
     checkUpdates: true,   // offer new versions from GitHub each time BlogPulse opens
+    shareUsage: false, usageAsked: false,  // anonymous usage counts: off until the person agrees
     speechEngine: "device", ttsModel: "gpt-4o-mini-tts", ttsVoice: "coral", ttsInstructions: "",   // read aloud: iPhone voices or OpenAI
     theme: "auto", density: "comfortable", font: "sans", textSize: 1, storyScope: "new" },
   await load("settings", {})
@@ -385,6 +396,57 @@ function saveAll(touchSession = true) {
   if (touchSession && dataLoaded) settings.lastSession = Date.now();
   write("sources", sources); write("articles", articles);   // write() skips these until the data was read
   write("settings", settings);
+}
+
+let usageQueue = [], usageTimer = null;
+const usageAvailable = () => !!USAGE.KEY;
+const usageOn = () => usageAvailable() && !!settings.shareUsage;
+function installId() {
+  if (Keychain.contains(KC_INSTALL)) return Keychain.get(KC_INSTALL);
+  const id = UUID.string().toLowerCase();
+  Keychain.set(KC_INSTALL, id);
+  return id;
+}
+function track(event, props = {}) {
+  if (!usageOn()) return;
+  try {
+    usageQueue.push({ event, timestamp: new Date().toISOString(),
+      properties: Object.assign({ distinct_id: installId(), $process_person_profile: false, app: APP_ID, app_version: VERSION, $lib: APP_ID }, props) });
+    if (usageQueue.length >= 25) flushUsage();
+    else if (!usageTimer) usageTimer = Timer.schedule(3000, false, () => { usageTimer = null; flushUsage(); });
+  } catch (e) {}
+}
+let usageLast = null;   // { at, events, ok, status, host, error }: shown in Settings › Privacy
+async function postUsage(host, batch) {
+  const r = new Request(host + '/batch/');
+  r.method = 'POST'; r.timeoutInterval = 10; r.headers = { 'Content-Type': 'application/json' };
+  r.body = JSON.stringify({ api_key: USAGE.KEY, batch });
+  let body = '';
+  try { body = await r.loadString(); } catch (e) { return { ok: false, status: 0, host, error: String(e.message || e) }; }
+  const status = (r.response && r.response.statusCode) || 0;
+  return { ok: status >= 200 && status < 300, status, host, error: status >= 200 && status < 300 ? '' : String(body || '').slice(0, 200) };
+}
+// Sends what's queued in one request. Never slows the app; if it fails, those counts are gone (and the log says why).
+async function flushUsage() {
+  if (!usageQueue.length) return usageLast;
+  if (!usageOn()) { usageQueue = []; return usageLast; }
+  const batch = usageQueue.splice(0, usageQueue.length);
+  const res = await postUsage(USAGE.HOST, batch);
+  usageLast = Object.assign({ at: Date.now(), events: batch.length }, res);
+  try { startLog(`usage: ${batch.length} event${batch.length === 1 ? '' : 's'} → ${res.ok ? 'sent to ' + res.host.replace('https://', '') : 'not sent: ' + (res.status ? 'HTTP ' + res.status + ' ' : '') + res.error}`); } catch (e) {}
+  return usageLast;
+}
+function usageStatus() {
+  const u = usageLast;
+  if (!u) return '';
+  const t = new Date(u.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return u.ok ? `Last sent ${t}: ${u.events} event${u.events === 1 ? '' : 's'}, accepted (${u.host.replace('https://', '')})`
+              : `Last try ${t} failed: ${u.status ? 'HTTP ' + u.status + ' ' : ''}${u.error}`;
+}
+function setUsage(on) {
+  settings.shareUsage = !!on; settings.usageAsked = true; saveAll();
+  if (on) track('usage_opt_in');
+  else { usageQueue = []; if (Keychain.contains(KC_INSTALL)) Keychain.remove(KC_INSTALL); }   // a fresh ID if switched on again
 }
 
 // ---------- network ----------
@@ -900,7 +962,7 @@ function clientState() {
     cfgSchema: CONFIG.map(([title, items]) => ({ title, items })),
     categories: CATS.map(c => ({ id: c[0], label: c[1], color: c[2] })),
     settings: {
-      groupBy: settings.groupBy, view: settings.view, readOnOpen: settings.readOnOpen, ai: settings.ai, aiProvider: settings.aiProvider, hasKey: !!aiKey(), checkUpdates: settings.checkUpdates !== false,
+      groupBy: settings.groupBy, view: settings.view, readOnOpen: settings.readOnOpen, ai: settings.ai, aiProvider: settings.aiProvider, hasKey: !!aiKey(), shareUsage: !!settings.shareUsage, checkUpdates: settings.checkUpdates !== false,
       voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1, voiceGender: settings.voiceGender || "all",
       speechEngine: settings.speechEngine || "device", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
       ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"),
@@ -908,6 +970,7 @@ function clientState() {
     },
     story: (() => { const st = stories[storyKey()]; return st ? Object.assign({}, st, { stale: st.sig !== storySig(st.scope, st.cat) }) : null; })(),
     picksReady: pk.ready, rated: pk.n, lastScan: settings.lastScan, palettes: PALETTES, version: VERSION,
+    usageAvailable: usageAvailable(), usageStatus: usageStatus(), usageAsk: usageAvailable() && !settings.usageAsked && !settings.shareUsage,
     ttsModels: settings.ttsModels || null,
     blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO,
     catalog: CATALOG.map(c => ({ title: c[0], feed: c[1], tags: c[2] })),
@@ -931,7 +994,7 @@ async function storyAction(m) {
   const scope = settings.storyScope, cat = settings.category || "all";
   if ((stories[storyKey()] && !m.force) || storyBusy) { saveAll(); push(); return call("onStory", storyBusy); }
   storyBusy = true; call("onStory", true);
-  try { await makeStory(scope, cat); saveWidget(widgetSnapshot()); }   // the widget's ✦ story line
+  try { await makeStory(scope, cat); saveWidget(widgetSnapshot()); track("story_made"); }   // the widget's ✦ story line
   catch (e) { toast("Story not written: " + String(e.message || e).slice(0, 90)); }
   storyBusy = false; saveAll(); push(); call("onStory", false);
 }
@@ -943,6 +1006,7 @@ async function runScan() {
   call("onProgress", 0, sources.filter(s => !s.paused).length);
   const fresh = await scanAll((d, t) => call("onProgress", d, t));
   call("onProgress", 0, 0);
+  track("blogs_checked", { new: fresh.length });
   saveAll(); push();
   saveWidget(widgetSnapshot());   // the widget shows what this scan found
   const failed = sources.filter(s => s.err && !s.paused).length;
@@ -960,12 +1024,21 @@ async function handle(m) {
     case "read": if (a) a.read = m.v ? 1 : 0; break;
     case "pin": if (a) { if (m.v) a.pinned = Date.now(); else delete a.pinned; if (m.done) a.read = 1; } break;   // Read later
     case "unpinRead": for (const id of m.ids || []) if (articles[id]) delete articles[id].pinned; break;
-    case "rate": if (a) { a.rating = m.v || 0; if (a.rating) a.read = 1; }
+    case "rate": if (a) { a.rating = m.v || 0; if (a.rating) { a.read = 1; track("post_rated", { stars: a.rating }); } }
       { const pk = computePicks(Object.values(articles), cfg("picksMinRatings"), cfg("picksThreshold")); call("onPicks", pk); } break;
     case "markAll": for (const id of m.ids || []) if (articles[id]) articles[id].read = 1; break;
-    case "open": if (a && a.link) { if (settings.readOnOpen) { a.read = 1; saveWidget(widgetSnapshot()); } saveAll(); await Safari.openInApp(a.link, false); } return;
-    case "set": if (["groupBy", "view", "readOnOpen", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "speechEngine", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v; break;
+    case "open": if (a && a.link) { if (settings.readOnOpen) { a.read = 1; saveWidget(widgetSnapshot()); } saveAll(); track("post_opened"); await Safari.openInApp(a.link, false); } return;
+    case "set": if (m.k === "shareUsage") { setUsage(m.v === true || m.v === "true" || m.v === "1"); return push(); }
+      if (["groupBy", "view", "readOnOpen", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "speechEngine", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v; break;
     case "refresh": return runScan();
+    case "usage-consent": setUsage(m.on === "1"); flushUsage(); return push();
+    case "usage-test": {
+      let ok = false, msg = "";
+      if (!usageOn()) msg = "Turn on Share anonymous usage first.";
+      else { track("usage_test"); const r = await flushUsage(); ok = !!(r && r.ok); msg = usageStatus() || "Nothing was sent."; }
+      return call("__done", m.req, ok, msg);
+    }
+    case "usage-listen": track("listened", { kind: ["article", "story", "summary", "group"].includes(m.kind) ? m.kind : "other", voice: settings.speechEngine === "ai" ? "ai" : "iphone" }); return;
     case "discover": {
       let res = [];
       try { res = await discover(m.q); } catch (e) {}
@@ -974,7 +1047,7 @@ async function handle(m) {
     case "add":
       try {
         const { src, count, fresh } = await addSource(m.feed, m.title);
-        saveAll(); push(); call("addDone", m.feed, true); saveWidget(widgetSnapshot());
+        saveAll(); push(); call("addDone", m.feed, true); saveWidget(widgetSnapshot()); track("blog_added");
         toast(`Following ${src.title} · ${count} recent posts`);
         if (fresh.length && settings.ai && aiKey()) aiSummaries(fresh).then(n => { if (n) { saveAll(); push(); } }).catch(() => {});
       } catch (e) { call("addDone", m.feed, false); toast(String(e.message || e)); }
@@ -993,6 +1066,7 @@ async function handle(m) {
       let res;
       try { res = await makeInvite(a, String(m.who || "").trim().slice(0, 120), instr); }
       catch (e) { res = { error: String(e.message || e) }; }
+      if (!res.error) track("invite_made");
       saveAll(); return call("onInvite", a.id, res);
     }
     case "share": if (m.text) await ShareSheet.present([m.text]); return;
@@ -1004,6 +1078,7 @@ async function handle(m) {
       if (a.tldr && m.force && !wantAI && a.tldr.kind === "extract") return call("onTldr", a.id, a.tldr);
       try { a.tldr = await makeTldr(a); }
       catch (e) { return call("onTldr", a.id, { error: String(e.message || e) }); }
+      track("summary_made", { provider: a.tldr && a.tldr.kind === "extract" ? "none" : settings.aiProvider });
       saveAll(); return call("onTldr", a.id, a.tldr);
     }
     case "articletext": {   // the article's own text, for "Listen to the full article"
@@ -1024,7 +1099,7 @@ async function handle(m) {
     case "update-later": pendingUpdate = null; return;   // asked again next time BlogPulse opens
     case "update-now": {
       let ok = false, msg = "";
-      try { msg = await applyUpdate(pendingUpdate); ok = true; pendingUpdate = null; }
+      try { msg = await applyUpdate(pendingUpdate); ok = true; pendingUpdate = null; track("app_updated", { from: VERSION, to: (msg.match(/[0-9]+\.[0-9]+\.[0-9]+/) || [""])[0] }); flushUsage(); }
       catch (e) { msg = String(e.message || e); }
       return call("__done", m.req, ok, msg);
     }
@@ -1187,6 +1262,9 @@ function clientApp() {
       <div class="srow"><div class="grow"><b>Mark as read when opened</b><small class="muted">Off: you mark posts read yourself</small></div><button class="switch ${S.settings.readOnOpen ? "on" : ""}" data-act="toggle" data-v="readOnOpen" aria-label="Mark as read when opened"></button></div>
       <div class="srow"><div class="grow"><b>Picks</b><small class="muted">${S.picksReady ? `Learning from ${S.rated} ratings` : `Rate ${Math.max(0, S.cfg.picksMinRatings - S.rated)} more post${S.cfg.picksMinRatings - S.rated === 1 ? "" : "s"} to switch on`}</small></div></div>
       <h3 class="sec">Listening</h3>${listenHTML()}
+      ${S.usageAvailable ? `<h3 class="sec">Privacy</h3>
+      <div class="srow"><div class="grow"><b>Share anonymous usage</b><small class="muted">Counts like app opens, posts read and AI summaries made, with a random install ID. Never your blogs, posts or anything you read. Off removes the ID.</small></div><button class="switch ${S.settings.shareUsage ? "on" : ""}" data-act="toggle" data-v="shareUsage" aria-label="Share anonymous usage"></button></div>
+      <div class="srow"><div class="grow"><b>Test the connection</b><small id="usagemsg" class="muted" aria-live="polite">${esc(S.usageStatus || "Sends one test event now and shows PostHog’s answer.")}</small></div><button class="sm" data-act="usage-test">Send test</button></div>` : ""}
       <h3 class="sec">Updates</h3>
       <div class="srow"><div class="grow"><b>Offer new versions</b><small class="muted">You have BlogPulse ${esc(S.version)}. Checked each time BlogPulse opens.</small></div><button class="switch ${S.settings.checkUpdates ? "on" : ""}" data-act="toggle" data-v="checkUpdates" aria-label="Offer new versions"></button></div>
       <div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>
@@ -1417,8 +1495,13 @@ function clientApp() {
     if (view === "story" && !S.settings.hasKey) view = "unread";
     adding.forEach(f => { if (S.sources.some(s => s.feed === f)) adding.delete(f); });
     aiLoading.clear();
-    render(); renderSheet(); renderAI(); renderCfg();
+    render(); renderSheet(); renderAI(); renderCfg(); renderUsageAsk();
   };
+  // Anonymous usage (app-blueprints · usage-analytics): the one-time question, under the header
+  function renderUsageAsk() {
+    const slot = document.getElementById("usageslot"); if (!slot) return;
+    slot.innerHTML = S.usageAsk ? `<section id="usageask" aria-label="Anonymous usage"><b>Help improve BlogPulse?</b><p>Share anonymous counts, like app opens, posts read and AI summaries made. Never your blogs, posts or anything you read. You can change this in Settings.</p><div class="uabtns"><button class="sm primary" data-act="usage-yes">Yes, share</button><button class="sm" data-act="usage-no">No thanks</button></div></section>` : "";
+  }
   // ── update pitch ──
   window.__showUpdate = function (u) {
     if (!u || document.getElementById("upd")) return;
@@ -2024,10 +2107,10 @@ function clientApp() {
         if (S.settings.readOnOpen && !a.read) { a.read = true; keep.add(a.id); setTimeout(() => view === "story" ? render() : refreshCard(a), 300); }
         send("open", { id }); break;
       case "read": a.read = !a.read; keep.add(a.id); send("read", { id, v: a.read }); refreshCard(a); if (tldrId) renderTldr(); break;
-      case "listengroup": { const items = (groupIdx[v] || []).map(postItem); if (items.length) speak(label(+v)[0], items); break; }
-      case "listenstory": if (S.story) speak("Story", storyItems(S.story)); break;
-      case "listentldr": { const d = tl[id]; if (a && d && d !== "loading" && !d.error) speak("TL;DR", tldrItems(a, d)); break; }
-      case "listenarticle":   // speak right away (iOS only lets speech start from a tap), then the article follows
+      case "listengroup": { send("usage-listen", { kind: "group" }); const items = (groupIdx[v] || []).map(postItem); if (items.length) speak(label(+v)[0], items); break; }
+      case "listenstory": send("usage-listen", { kind: "story" }); if (S.story) speak("Story", storyItems(S.story)); break;
+      case "listentldr": { send("usage-listen", { kind: "summary" }); const d = tl[id]; if (a && d && d !== "loading" && !d.error) speak("TL;DR", tldrItems(a, d)); break; }
+      case "listenarticle": send("usage-listen", { kind: "article" });   // speak right away (iOS only lets speech start from a tap), then the article follows
         if (a) { speak("Full article", [{ id, title: a.title, text: "Loading the article." }]); send("articletext", { id }); } break;
       case "plpause": togglePause(); break;
       case "plnext": skipItem(); break;
@@ -2058,6 +2141,15 @@ function clientApp() {
         const pre = $("#startlog");
         if (!pre.hidden) { pre.hidden = true; t.textContent = "Show"; break; }
         send("startlog", {}, (ok, txt) => { pre.textContent = txt || "Nothing logged yet."; pre.hidden = false; t.textContent = "Hide"; });
+        break;
+      }
+      case "usage-yes": case "usage-no":
+        send("usage-consent", { on: act === "usage-yes" ? "1" : "0" }); S.usageAsk = false; renderUsageAsk();
+        window.toast(act === "usage-yes" ? "Thank you! Change it any time in Settings." : "No problem. Nothing is shared.");
+        break;
+      case "usage-test": {
+        const um = $("#usagemsg"); t.disabled = true; if (um) um.textContent = "Sending…";
+        send("usage-test", {}, (ok, msg) => { t.disabled = false; const m = $("#usagemsg"); if (m) m.textContent = (ok ? "✓ " : "✗ ") + msg; });
         break;
       }
       case "updcheck": {
@@ -2257,7 +2349,7 @@ function clientApp() {
   addEventListener("resize", renderChrome);
 
   if (view === "story") requestStory(false);
-  render();
+  render(); renderUsageAsk();
   if (!S.sources.length) { sheetOpen = true; renderSheet(); }
   setInterval(renderStatus, 30000);
 }
@@ -2646,6 +2738,11 @@ body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 84px)}
 .cfgin.wide{display:block;width:100%;margin-top:8px;font:15px/1.45 var(--sans);padding:9px 11px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);-webkit-user-select:text;user-select:text}
 textarea.cfgin.wide{resize:vertical}
 .cfgin:focus{outline:2px solid var(--signal);outline-offset:-1px}
+#usageask{background:var(--sheet);border:1px solid var(--rule);border-radius:18px;padding:14px 16px;margin:10px 14px 4px}
+#usageask b{font-size:calc(16px * var(--ts))}
+#usageask p{margin:6px 0 12px;color:var(--muted);font-size:calc(14px * var(--ts));line-height:1.4}
+.uabtns{display:flex;gap:10px}
+.uabtns button{flex:1;padding:10px}
 .cfg-foot{margin-top:18px}
 /* Settings blueprint 1.1.0: sections are cards under small muted capitals */
 #cfgsheet h3.sec{font:700 calc(12.5px * var(--ts, 1))/1.2 var(--sans, -apple-system, system-ui, sans-serif);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:28px 4px 8px}
@@ -2748,6 +2845,7 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
 <div id="ptr" aria-live="polite"><div class="ptr-in">
   <svg class="ptr-ring" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="11" class="trk"/><circle id="ptrpull" cx="14" cy="14" r="11" class="pull"/><circle id="ptrhold" cx="14" cy="14" r="11" class="hold"/></svg>
   <span class="busy-dot"></span><span id="ptrtext">Pull down to check for new posts</span></div></div>
+<div id="usageslot"></div>
 <main id="list"><div class="booting" role="status"><span class="busy-dot"></span>Loading your posts…</div></main>
 <p class="ver">BlogPulse v${VERSION}</p>
 <div id="sheet" class="sheet" aria-label="Manage blogs">
@@ -3146,6 +3244,7 @@ async function bootApp(isClosed) {
   let seen = "";
   try { seen = await ev(`document.visibilityState + ", " + innerWidth + "x" + innerHeight + ", splash " + (document.getElementById("splash") || {}).className`, 5000); } catch (e) { seen = String(e.message || e); }
   startLog(`screen ready in ${((Date.now() - t0) / 1000).toFixed(1)} s (page: ${seen})`);
+  track("app_open", { layout: settings.density, theme: settings.theme, ai_key: !!aiKey(), group_by: settings.groupBy });
   if (loadIssues.length) toast("Some of your data is still coming from iCloud. Nothing will be saved until you reopen BlogPulse.");
   else if (loadRepaired.length) toast("Some of your data couldn't be read, so BlogPulse kept a copy and started it fresh.");
   // Deferred work, once the first screen is drawn: checking blogs, then updates, then the widget's icon.
@@ -3170,7 +3269,7 @@ async function main() {
   startLog("window on screen");
   await Promise.race([wv.loadHTML(buildHTML()), pause(15000)]);   // the launch screen, drawn on screen
   let closed = false;
-  presented.then(() => { closed = true; releaseLock(); });
+  presented.then(() => { closed = true; releaseLock(); flushUsage(); });
   bootApp(() => closed).catch(e => {         // runs beside the window: closing it never waits on this
     startLog("start-up failed: " + (e.message || e));
     let log = "";

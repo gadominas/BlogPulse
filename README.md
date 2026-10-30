@@ -205,7 +205,9 @@ BlogPulse checks this repository for a new version each time it opens. When one 
 
 ## Privacy and security
 
-- **Everything runs on your phone.** There is no BlogPulse server and nothing is collected. Your reading data (blogs, posts, ratings, stories, token counts, settings) is stored as JSON in **iCloud Drive › Scriptable › BlogPulse**.
+- **Anonymous usage, only if you agree.** A one-time question (and **Settings › Privacy › Share anonymous usage**) decides whether BlogPulse sends anonymous counts to PostHog's US cloud: app opens, blogs checked, posts opened and rated (the star count only), AI summaries and stories made, listening, blogs added and invites written, the app version and a few display settings. Each event carries a random install ID made on your phone, not linked to anything else. Never sent: blogs, post titles, links or text, invite text or names. Turning it off stops sending and deletes the install ID.
+
+- **Everything runs on your phone.** There is no BlogPulse server, and nothing is collected unless you agree to the anonymous usage counts below. Your reading data (blogs, posts, ratings, stories, token counts, settings) is stored as JSON in **iCloud Drive › Scriptable › BlogPulse**.
 - **What leaves the phone:** requests to the blogs you follow, Feedly's public feed search when you search by name, and your AI provider. The AI receives post titles and excerpts, and for a TL;DR the article text, only when a feature needs it and only from the provider you chose; the ✦ AI voice sends the text to be spoken to OpenAI.
 - AI keys stay in the iOS Keychain and are only sent to their own provider.
 - The update check only downloads `releases.json` from this repository.
