@@ -14,6 +14,12 @@ All notable changes to BlogPulse. Generated from `releases.json`; edit that file
 - Appears after the launch screen and never on a launch that offers an update, over a sheet, the Mark all read dialog or while Listen is playing
 - Later (or a tap outside the card) brings it back in 3 days, in 7 days after the fourth time; removing your last key brings it back on the next launch
 - Settings › Built with lists the AI invitation blueprint
+- A data file that can't be read is copied aside (for example articles.broken-1730000000000.json) and started fresh, with a short note when BlogPulse opens
+
+**Fixes**
+
+- Turn on AI highlights Add key on the provider in use: with OpenAI in use, it highlighted Claude's button
+- One damaged data file no longer stops BlogPulse from saving your changes
 
 ## 1.11.0 (2026-10-30): Read it later
 
