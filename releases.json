@@ -4,6 +4,34 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.14.0",
+      "date": "2026-10-31",
+      "title": "Anonymous usage, if you agree",
+      "highlights": [
+        {
+          "icon": "📊",
+          "title": "Help shape BlogPulse",
+          "text": "If you agree, BlogPulse sends anonymous counts of the features you use. Nothing else."
+        },
+        {
+          "icon": "🔒",
+          "title": "Anonymous by design",
+          "text": "A random ID made on your phone, never your content, names or accounts."
+        },
+        {
+          "icon": "🎛️",
+          "title": "Your choice, any time",
+          "text": "Settings › Privacy turns it on or off, and Send test shows what happened."
+        }
+      ],
+      "changes": [
+        "Anonymous usage analytics (app-blueprints · usage-analytics 1.1.0): opt-in, anonymous counts to PostHog's US cloud, with a one-time question and Settings › Privacy (switch and Send test)",
+        "Events: app_open (layout, theme, ai_key, group_by), blogs_checked (new), post_opened, post_rated (stars), summary_made (provider), story_made, listened (kind, voice), blog_added, invite_made, app_updated",
+        "Never sent: blog or post titles, links, text, ratings of named posts, invite text or names"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.13.0",
       "date": "2026-10-31",
       "title": "Clearer Settings",

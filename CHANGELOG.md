@@ -2,6 +2,18 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.14.0 (2026-10-31): Anonymous usage, if you agree
+
+- 📊 **Help shape BlogPulse**: If you agree, BlogPulse sends anonymous counts of the features you use. Nothing else.
+- 🔒 **Anonymous by design**: A random ID made on your phone, never your content, names or accounts.
+- 🎛️ **Your choice, any time**: Settings › Privacy turns it on or off, and Send test shows what happened.
+
+**Changes**
+
+- Anonymous usage analytics (app-blueprints · usage-analytics 1.1.0): opt-in, anonymous counts to PostHog's US cloud, with a one-time question and Settings › Privacy (switch and Send test)
+- Events: app_open (layout, theme, ai_key, group_by), blogs_checked (new), post_opened, post_rated (stars), summary_made (provider), story_made, listened (kind, voice), blog_added, invite_made, app_updated
+- Never sent: blog or post titles, links, text, ratings of named posts, invite text or names
+
 ## 1.13.0 (2026-10-31): Clearer Settings
 
 - 🗂️ **Sections you can see**: Each Settings section now sits in its own card, so you can tell where it starts and ends.
