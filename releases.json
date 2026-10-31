@@ -4,6 +4,34 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.15.1",
+      "date": "2026-10-31",
+      "title": "Room for the player",
+      "highlights": [
+        {
+          "icon": "📏",
+          "title": "Nothing hidden behind the player",
+          "text": "The last post in the list scrolls clear of the player while you listen."
+        },
+        {
+          "icon": "💬",
+          "title": "Messages above the player",
+          "text": "Short messages now appear above the player instead of on top of it."
+        },
+        {
+          "icon": "🧩",
+          "title": "Read aloud blueprint",
+          "text": "Settings › Built with lists Read aloud, now shared with other apps."
+        }
+      ],
+      "changes": [
+        "Settings › Built with lists the new Read aloud blueprint 1.0.0 (BlogPulse is its reference app)"
+      ],
+      "fixes": [
+        "An older style rule undid the room made for the two-row player, so the last post could hide behind it and messages appeared on top of it"
+      ]
+    },
+    {
       "version": "1.15.0",
       "date": "2026-10-31",
       "title": "Follow along as you listen",

@@ -2,6 +2,20 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.15.1 (2026-10-31): Room for the player
+
+- 📏 **Nothing hidden behind the player**: The last post in the list scrolls clear of the player while you listen.
+- 💬 **Messages above the player**: Short messages now appear above the player instead of on top of it.
+- 🧩 **Read aloud blueprint**: Settings › Built with lists Read aloud, now shared with other apps.
+
+**Changes**
+
+- Settings › Built with lists the new Read aloud blueprint 1.0.0 (BlogPulse is its reference app)
+
+**Fixes**
+
+- An older style rule undid the room made for the two-row player, so the last post could hide behind it and messages appeared on top of it
+
 ## 1.15.0 (2026-10-31): Follow along as you listen
 
 - 🏷 **Always know what's playing**: The player says Full article, TL;DR, Story or Summaries, and buttons are named to match.
