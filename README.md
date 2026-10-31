@@ -101,7 +101,7 @@ What else you need:
 | Mark as read | Tap **Mark read**, **Mark N read** next to a day to clear that day, or **Mark all read** at the top of the list to clear the page you're on, after a warning |
 | Rate | Tap one, two or three stars. Tap the same star again to clear it |
 | Read the Story | Open the **Story** tab and choose *Since last visit*, *Today* or *This week* |
-| Listen instead of reading | Tap **Listen** on a post to hear the full article, **Listen** next to a day for its summaries, **Listen to the story**, or **Listen** in a TL;DR. The player at the bottom shows progress and time left; tap the bar to jump, and pause, skip or stop |
+| Listen instead of reading | Tap **Article** on a post to hear the full article, **Summaries** next to a day, **Listen to the story**, or **Listen to TL;DR**. The player shows what's being read (Full article, TL;DR, Story or Summaries), progress and time left. Tap its text button to follow along: the current sentence is highlighted and read text dims; tap a sentence or the bar to jump |
 | Change the voice | **Settings › Listening**: choose **iPhone voice** or **✦ AI voice**, filter Female or Male, pick a voice, set speed, then **Test the voice** |
 | Invite someone to read | Open the TL;DR, tap **Invite to read**, add your instructions, then **Share…** |
 | Check for new posts | Pull the list down and hold until the ring fills, or tap refresh |

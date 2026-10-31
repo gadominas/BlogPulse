@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.14.0';
+const VERSION = '1.15.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -1367,12 +1367,12 @@ function clientApp() {
     return `<div class="tli">
       <div class="tli-top">${d.kind === "ai" ? `<span class="badge-ai">✦ AI summary by ${d.provider === "openai" ? "OpenAI" : "Claude"}</span>` : `<span class="badge-ex">Extracted — no AI</span>`}${d.mins ? `<span>${d.mins} min read</span>` : ""}</div>
       ${d.partial ? `<p class="note">The full page couldn't be read, so this uses the feed excerpt.</p>` : ""}
-      <p class="tli-lead">${esc(d.lead)}</p>
-      ${d.points && d.points.length ? `<ul>${d.points.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
-      ${d.why ? `<p class="tli-why"><b>Why it matters:</b> ${esc(d.why)}</p>` : ""}
+      <p class="tli-lead">${tldrPart(a, "lead", esc(d.lead))}</p>
+      ${d.points && d.points.length ? `<ul>${d.points.map((x, i) => `<li>${tldrPart(a, "pt" + i, esc(x))}</li>`).join("")}</ul>` : ""}
+      ${d.why ? `<p class="tli-why">${readingTldr(a) ? tldrPart(a, "why", "") : `<b>Why it matters:</b> ${esc(d.why)}`}</p>` : ""}
       ${!d.why && d.sections && d.sections.length ? `<p class="tli-why"><b>Covers:</b> ${d.sections.map(esc).join(" / ")}</p>` : ""}
       <div class="tli-act">
-        <button class="sm" data-act="listentldr" data-id="${a.id}">${SPK}Listen</button>
+        <button class="sm" data-act="listentldr" data-id="${a.id}">${SPK}Listen to TL;DR</button>
         <button class="sm" data-act="tldrpanel" data-id="${a.id}">${S.settings.hasKey ? "✦ " : ""}Invite to read</button>
         ${d.kind !== "ai" && S.settings.hasKey ? `<button class="sm" data-act="tldrretry" data-id="${a.id}">✦ Summarise with AI</button>` : ""}
         <button class="hide" data-act="tldr" data-id="${a.id}">Hide</button>
@@ -1576,16 +1576,43 @@ function clientApp() {
   }
   const langName = code => { try { return new Intl.DisplayNames([navigator.language || "en"], { type: "language" }).of(code) || code; } catch (e) { return code; } };
   const clean = t => String(t || "").replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, "").replace(/\*\*|__/g, "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
-  function chunks(t) {   // short pieces: long utterances can stop early in WebKit
-    const out = [];
-    for (let sen of clean(t).match(/[^.!?…]+[.!?…]+["”’)]*\s*|[^.!?…]+$/g) || []) {
-      sen = sen.trim(); if (!sen) continue;
-      while (sen.length > 220) { let cut = sen.lastIndexOf(", ", 220); if (cut < 80) cut = sen.lastIndexOf(" ", 220); if (cut < 40) cut = 220; out.push(sen.slice(0, cut + 1).trim()); sen = sen.slice(cut + 1).trim(); }
-      if (out.length && out[out.length - 1].length + sen.length < 160) out[out.length - 1] += " " + sen; else out.push(sen);
-    }
-    return out;
+  // A reading is made of items (a post, a story section…), each made of paragraphs, each made of sentences.
+  // Sentences ("segments") are what the screen highlights; parts are what the voice speaks (sentences joined).
+  const sentences = t => (clean(t).match(/[^.!?…]+[.!?…]+["”’)]*\s*|[^.!?…]+$/g) || []).map(x => x.trim()).filter(Boolean);
+  function buildPlan(items, ai) {
+    const segs = [], parts = [];
+    let cur = null;
+    const push = (seg, k) => {
+      const room = ai ? (parts.length <= 1 ? 700 : 2000) : 160;   // AI: a short first piece so audio starts quickly
+      if (!cur || cur.k !== k || (ai ? cur.t.length + seg.say.length + 1 > room : cur.t.length + seg.say.length >= room)) {
+        cur = { t: "", k, segs: [] }; parts.push(cur);
+      }
+      seg.part = parts.length - 1; seg.l0 = cur.t ? cur.t.length + 1 : 0;
+      cur.t = cur.t ? cur.t + " " + seg.say : seg.say;
+      cur.segs.push(segs.length); segs.push(seg);
+    };
+    items.forEach((it, k) => (it.paras || [{ text: it.text }]).forEach((p, pi) => {
+      const sens = sentences(p.text);
+      sens.forEach((sen, si) => {
+        const pieces = [];
+        if (!ai) {   // WebKit can stop part-way through very long sentences: cut them at a comma or a space
+          while (sen.length > 220) { let cut = sen.lastIndexOf(", ", 220); if (cut < 80) cut = sen.lastIndexOf(" ", 220); if (cut < 40) cut = 220; pieces.push(sen.slice(0, cut + 1).trim()); sen = sen.slice(cut + 1).trim(); }
+        }
+        pieces.push(sen);
+        pieces.forEach((show, j) => {
+          const last = si === sens.length - 1 && j === pieces.length - 1;
+          const say = last && !/[.!?…:]["”’)]*$/.test(show) ? show + "." : show;   // a short pause after titles and bullets
+          push({ show, say, len: say.length, k, pi, key: p.key || "", head: !!p.head }, k);
+        });
+      });
+    }));
+    let acc = 0;
+    parts.forEach(pt => { pt.c0 = acc; acc += pt.t.length; });
+    segs.forEach(sg => { sg.a0 = parts[sg.part].c0 + sg.l0; sg.a1 = sg.a0 + sg.len; });
+    return { segs, parts, total: acc };
   }
-  const tts = { parts: [], i: 0, label: "", items: [], token: 0, paused: false, on: false, timer: null, engine: "device", loading: false };
+  const MODES = { article: "Full article", tldr: "TL;DR", story: "Story", summaries: "Summaries", test: "Voice test" };
+  const tts = { parts: [], segs: [], i: 0, label: "", items: [], token: 0, paused: false, on: false, timer: null, engine: "device", loading: false, kind: "", id: "", nowSeg: -1 };
   // AI voice: OpenAI speech, played through one <audio> element that a tap unlocks first
   const OAI_VOICES = [["alloy", "n"], ["ash", "m"], ["ballad", "m"], ["coral", "f"], ["echo", "m"], ["fable", "m"], ["nova", "f"], ["onyx", "m"], ["sage", "f"], ["shimmer", "f"], ["verse", "m"], ["marin", "f"], ["cedar", "m"]];
   const LEGACY_TTS = new Set(["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]);
@@ -1599,15 +1626,6 @@ function clientApp() {
     let str = ""; buf.forEach(b => { str += String.fromCharCode(b); }); return "data:audio/wav;base64," + btoa(str);
   })();
   function unlockAudio() { try { au.src = SILENT; const p = au.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
-  function aiChunks(t) {   // split at sentences: a short first piece so audio starts quickly, then up to ~2,000 characters
-    const out = []; let cur = "";
-    for (const sen of clean(t).match(/[^.!?…]+[.!?…]+["”’)]*\s*|[^.!?…]+$/g) || []) {
-      if (cur && (cur + sen).length > (out.length ? 2000 : 700)) { out.push(cur.trim()); cur = ""; }
-      cur += sen;
-    }
-    if (cur.trim()) out.push(cur.trim());
-    return out;
-  }
   function aiFetch(part) {
     if (part.audio) return Promise.resolve(part.audio);
     if (!part.pending) part.pending = new Promise((res, rej) => send("ttsaudio", { text: part.t }, (ok, msg) => ok ? res(part.audio = msg) : rej(msg)));
@@ -1639,25 +1657,25 @@ function clientApp() {
       if (my !== tts.token) return;
       const rest = tts.items.slice(part.k), label = tts.label;
       toast(`AI voice failed: ${String(err || "").slice(0, 70)}. Using the iPhone voice.`);
-      if (SYN && voices.length) speak(label, rest, "device"); else stopSpeaking();
+      if (SYN && voices.length) speak(label, rest, "device", tts.kind); else stopSpeaking();
     });
   }
   const playSoon = () => { clearTimeout(tts.timer); tts.timer = setTimeout(playPart, 60); };   // iOS needs a beat after cancel()
-  function speak(label, items, engine) {
+  function speak(label, items, engine, kind) {
     const ai = engine ? engine === "ai" : aiTTS();
     if (!ai && (!SYN || !voices.length)) {   // no Web Speech: hand the text to Scriptable's system voice
-      send("speak", { text: items.map(x => clean(x.text)).join(" ") });
+      send("speak", { text: items.map(x => clean(x.text || (x.paras || []).map(p => p.text).join(". "))).join(" ") });
       return toast("Reading aloud with the system voice");
     }
     stopSpeaking(true);
     if (ai) unlockAudio();   // has to happen inside the tap, before any waiting
     tts.engine = ai ? "ai" : "device";
     tts.items = items; tts.label = label; tts.i = 0; tts.paused = false; tts.on = true;
-    tts.parts = [];
-    items.forEach((it, k) => (ai ? aiChunks : chunks)(it.text).forEach(t => tts.parts.push({ t, k })));
-    let acc = 0; tts.parts.forEach(p => { p.c0 = acc; acc += p.t.length; });
-    tts.total = acc; tts.pos = 0;
+    tts.kind = kind || ""; tts.id = (items[0] && items[0].id) || ""; tts.nowSeg = -1;
+    const plan = buildPlan(items, ai);
+    tts.parts = plan.parts; tts.segs = plan.segs; tts.total = plan.total; tts.pos = 0;
     if (!tts.parts.length) return stopSpeaking();
+    refreshReadingViews();   // wrap the text being read in highlightable sentences
     playSoon();
   }
   function playPart() {
@@ -1676,7 +1694,9 @@ function clientApp() {
     tts.token++; tts.on = false; tts.paused = false; tts.loading = false; clearTimeout(tts.timer);
     au.onended = null; try { au.pause(); } catch (e) {}
     if (SYN) SYN.cancel();
-    if (!quiet) renderPlayer();
+    document.querySelectorAll(".rs-now,.rs-done").forEach(el => el.classList.remove("rs-now", "rs-done"));
+    tts.nowSeg = -1;
+    if (!quiet) { renderPlayer(); if (raOpen) { raOpen = false; renderReadAlong(); } }
   }
   function togglePause() {
     if (!tts.on) return;
@@ -1702,10 +1722,28 @@ function clientApp() {
     const left = Math.round((tts.total - done) / cps / 60);
     $("#plTime").textContent = `${Math.round(pct * 100)}% — ${left < 1 ? "less than a minute" : "about " + left + " min"} left`;
     $("#plProg").setAttribute("aria-valuenow", String(Math.round(pct * 100)));
+    paintSegs(segAt(done));
   }
-  function seekTo(f) {   // tap on the bar: jump to that sentence (or that second, within the piece playing)
+  function segAt(c) {   // the sentence containing character c (searching near the last one)
+    const sg = tts.segs; if (!sg.length) return -1;
+    let i = Math.max(0, Math.min(sg.length - 1, tts.nowSeg));
+    while (i > 0 && c < sg[i].a0) i--;
+    while (i < sg.length - 1 && c >= sg[i].a1) i++;
+    return i;
+  }
+  const segCls = i => !tts.on || tts.nowSeg < 0 ? "" : i < tts.nowSeg ? "rs-done" : i === tts.nowSeg ? "rs-now" : "";
+  function paintSegs(now) {   // read sentences dim, the current one is highlighted
+    const prev = tts.nowSeg;
+    if (now === prev || now < 0) return;
+    const lo = Math.max(0, Math.min(prev, now)), hi = Math.max(prev, now);
+    tts.nowSeg = now;
+    for (let i = lo; i <= hi; i++) document.querySelectorAll(`.rs[data-s="${i}"]`).forEach(el => { el.classList.toggle("rs-done", i < now); el.classList.toggle("rs-now", i === now); });
+    if (raOpen && Date.now() > raHold) { const el = document.querySelector(`#readsheet .rs[data-s="${now}"]`); if (el && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+  }
+  function seekTo(f) { if (tts.on && tts.total) seekChar(f * tts.total); }   // tap on the bar
+  function seekChar(c) {   // jump to that sentence (or that second, within the piece playing)
     if (!tts.on || !tts.total) return;
-    const target = Math.max(0, Math.min(tts.total - 1, f * tts.total));
+    const target = Math.max(0, Math.min(tts.total - 1, c));
     const j = tts.parts.findIndex(p => target >= p.c0 && target < p.c0 + p.t.length);
     if (j < 0) return;
     const p = tts.parts[j];
@@ -1723,6 +1761,9 @@ function clientApp() {
     if (!on) return;
     const part = tts.parts[tts.i] || {}, it = tts.items[part.k] || {};
     $("#plTitle").textContent = it.title || tts.label;
+    const mode = MODES[tts.kind] || "";
+    $("#plMode").textContent = mode; $("#plMode").hidden = !mode;
+    $("#plMode").className = "pl-mode m-" + (tts.kind || "x");
     $("#plSub").textContent = (tts.engine === "ai" ? "✦ AI voice — " : "") + tts.label + (tts.items.length > 1 ? ` — ${part.k + 1} of ${tts.items.length}` : "")
       + (tts.loading ? " — preparing…" : tts.paused ? " — paused" : "");
     pl.classList.toggle("paused", tts.paused);
@@ -1733,21 +1774,58 @@ function clientApp() {
   }
   const PLAY_ICO = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`, PAUSE_ICO = `<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>`;
   const srcTitle = a => (srcMap()[a.src] || {}).title || "";
-  const postItem = a => ({ id: a.id, title: a.title, text: `${a.title}. From ${srcTitle(a)}. ${a.desc || ""}` });
+  const head = (a) => [{ key: "title", head: true, text: a.title }, { key: "from", text: "From " + srcTitle(a) }];
+  const postItem = a => ({ id: a.id, title: a.title, paras: head(a).concat(a.desc ? [{ key: "desc", text: a.desc }] : []) });
   function tldrItems(a, d) {
-    const parts = [d.lead].concat(d.points || []).concat(d.why ? ["Why it matters: " + d.why] : []);
-    return [{ id: a.id, title: a.title, text: `${a.title}. From ${srcTitle(a)}. ${parts.map(x => /[.!?]$/.test(x) ? x : x + ".").join(" ")}` }];
+    return [{ id: a.id, title: a.title, paras: head(a).concat([{ key: "lead", text: d.lead }],
+      (d.points || []).map((x, i) => ({ key: "pt" + i, text: x })), d.why ? [{ key: "why", text: "Why it matters: " + d.why }] : []) }];
   }
   function storyItems(st) {
-    const items = [{ title: st.headline, text: `${st.headline}. ${st.dek || ""}` }];
-    if (st.tldr && st.tldr.length) items.push({ title: "In short", text: "In short. " + st.tldr.map(x => clean(x).replace(/[.!?]?$/, ".")).join(" ") });
-    st.sections.forEach(x => items.push({ title: x.title, text: `${x.title}. ${x.body}` }));
+    const items = [{ title: st.headline, paras: [{ head: true, text: st.headline }].concat(st.dek ? [{ text: st.dek }] : []) }];
+    if (st.tldr && st.tldr.length) items.push({ title: "In short", paras: [{ head: true, text: "In short" }].concat(st.tldr.map(x => ({ text: x }))) });
+    st.sections.forEach(x => items.push({ title: x.title, paras: [{ head: true, text: x.title }].concat(String(x.body).split(/\n\s*\n/).filter(t => t.trim()).map(t => ({ text: t }))) }));
     return items;
+  }
+  // Sentences of the text being read, as tappable spans (tap one to jump there).
+  function segSpans(filter) {
+    const out = [];
+    tts.segs.forEach((sg, i) => { if (filter(sg)) out.push(`<span class="rs ${segCls(i)}" data-act="rsseek" data-s="${i}">${esc(sg.show)}</span>`); });
+    return out.join(" ");
+  }
+  // While a post's TL;DR is read, its TL;DR text is shown sentence by sentence (inline and in the TL;DR screen).
+  const readingTldr = a => tts.on && tts.kind === "tldr" && tts.id === a.id;
+  const tldrPart = (a, key, plain) => readingTldr(a) ? segSpans(sg => sg.k === 0 && sg.key === key) || plain : plain;
+  function refreshReadingViews() {
+    if (tts.kind === "tldr" && tts.id) { if (expanded.has(tts.id)) refreshInline(tts.id); if (tldrId === tts.id) renderTldr(); }
+    if (raOpen) renderReadAlong();
+  }
+  // Read-along: the whole text being read, following the voice; read sentences dim.
+  let raOpen = false, raHold = 0;
+  document.addEventListener("touchstart", e => { if (raOpen && e.target.closest && e.target.closest("#readsheet")) raHold = Date.now() + 6000; }, { passive: true });
+  function renderReadAlong() {
+    const el = $("#readsheet");
+    el.classList.toggle("open", raOpen); lockBody();
+    if (!raOpen) return;
+    const first = tts.items[0] || {}, mode = MODES[tts.kind] || "Reading";
+    let body = "";
+    if (!tts.on) body = `<p class="muted pad">Nothing is being read right now.</p>`;
+    else tts.items.forEach((it, k) => {
+      const paras = {};
+      tts.segs.forEach((sg, i) => { if (sg.k === k) (paras[sg.pi] = paras[sg.pi] || { head: sg.head, ids: [] }).ids.push(i); });
+      if (tts.items.length > 1 && k > 0) body += `<hr class="ra-sep">`;
+      Object.keys(paras).sort((x, y) => x - y).forEach(pi => {
+        const pr = paras[pi], html = pr.ids.map(i => `<span class="rs ${segCls(i)}" data-act="rsseek" data-s="${i}">${esc(tts.segs[i].show)}</span>`).join(" ");
+        body += pr.head ? `<h2 class="ra-h">${html}</h2>` : `<p class="ra-p">${html}</p>`;
+      });
+    });
+    el.innerHTML = `<div class="sh-head"><div class="ra-top"><span class="pl-mode m-${tts.kind || "x"}">${esc(mode)}</span><small>${esc(tts.label)}</small></div><button class="link" data-act="raclose">Done</button></div>
+      <div class="ra-body">${body}<p class="note ra-hint">Tap a sentence to jump there. Read sentences are dimmed.</p></div>`;
+    const now = el.querySelector(".rs-now"); if (now && now.scrollIntoView) now.scrollIntoView({ block: "center" });
   }
   window.onArticleText = (id, r) => {
     const a = byId(id); if (!a) return;
     if (r.error) return toast(r.error);
-    speak("Full article — " + srcTitle(a), [{ id, title: a.title, text: `${a.title}. From ${srcTitle(a)}. ${r.paras.join(" ")}` }]);
+    speak(srcTitle(a), [{ id, title: a.title, paras: head(a).concat(r.paras.map((t, i) => ({ key: "p" + i, text: t }))) }], undefined, "article");
     if (r.partial) toast("The full page couldn't be read, so this is the excerpt");
   };
 
@@ -1873,7 +1951,7 @@ function clientApp() {
       <div class="row">
         <div class="stars ${a.rating ? "rated" : ""}">${stars}</div>
         ${a.isNew && !a.read ? `<span class="flag new">New</span>` : ""}${a.pick ? `<span class="flag pick">✦ Pick</span>` : ""}
-        <span class="acts"><button class="lsbtn" data-act="listenarticle" data-id="${a.id}" aria-label="Listen to the full article">${SPK}Listen</button>${tlBtn(a)}${view === "later" ? `<button class="readbtn done" data-act="pindone" data-id="${a.id}">Done</button>` : `<button class="readbtn" data-act="read" data-id="${a.id}">${a.read ? "Mark unread" : "Mark read"}</button>`}</span>
+        <span class="acts"><button class="lsbtn" data-act="listenarticle" data-id="${a.id}" aria-label="Listen to the full article">${SPK}Article</button>${tlBtn(a)}${view === "later" ? `<button class="readbtn done" data-act="pindone" data-id="${a.id}">Done</button>` : `<button class="readbtn" data-act="read" data-id="${a.id}">${a.read ? "Mark unread" : "Mark read"}</button>`}</span>
       </div>
     </article>`;
   }
@@ -1912,7 +1990,7 @@ function clientApp() {
     $("#list").innerHTML = bar + groups.map(g => {
       const [big, small] = label(g.k), unread = g.items.filter(a => !a.read).length;
       return `<section><header class="gh"><div><h2>${later ? "Saved " + big.replace(/^This week|^Last week/, m => m.toLowerCase()) : big}</h2><span>${esc(small)}</span></div>
-        <div class="gh-r"><span class="n">${g.items.length} post${g.items.length > 1 ? "s" : ""}</span><div class="gh-acts"><button class="gh-listen" data-act="listengroup" data-v="${g.k}" aria-label="Listen to ${esc(big)}">${SPK}Listen</button>${unread ? `<button data-act="markgroup" data-v="${g.k}">Mark ${unread} read</button>` : ""}</div></div></header>
+        <div class="gh-r"><span class="n">${g.items.length} post${g.items.length > 1 ? "s" : ""}</span><div class="gh-acts"><button class="gh-listen" data-act="listengroup" data-v="${g.k}" aria-label="Listen to the summaries of ${esc(big)}">${SPK}Summaries</button>${unread ? `<button data-act="markgroup" data-v="${g.k}">Mark ${unread} read</button>` : ""}</div></div></header>
         ${g.items.map(a => card(a, sm)).join("")}</section>`;
     }).join("") + (list.length > limit ? `<button class="more" data-act="more">Show ${Math.min(pageSize(), list.length - limit)} more</button>` : "");
   }
@@ -1995,7 +2073,7 @@ function clientApp() {
   }
 
   // ---- TL;DR sheet ----
-  const lockBody = () => document.body.classList.toggle("locked", sheetOpen || !!tldrId || aiOpen || cfgOpen);
+  const lockBody = () => document.body.classList.toggle("locked", sheetOpen || !!tldrId || aiOpen || cfgOpen || raOpen);
   function openTldr(id, force) {
     if (tldrId !== id) Object.assign(inv, { open: false, who: "", instr: "", busy: false, out: {} });   // fresh invite for each article
     tldrId = id;
@@ -2022,9 +2100,9 @@ function clientApp() {
         : `<p><span class="badge-ex">Extracted from the article — no AI</span></p>`;
       if (d.note) h += `<p class="note">${esc(d.note)}</p>`;
       if (d.partial) h += `<p class="note">The full page couldn't be read, so this uses the excerpt from the blog's feed.</p>`;
-      h += `<p class="tl-lead">${esc(d.lead)}</p>`;
-      if (d.points && d.points.length) h += `<ul class="tl-pts">${d.points.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`;
-      if (d.why) h += `<div class="tl-why"><b>Why it matters</b><p>${esc(d.why)}</p></div>`;
+      h += `<p class="tl-lead">${tldrPart(a, "lead", esc(d.lead))}</p>`;
+      if (d.points && d.points.length) h += `<ul class="tl-pts">${d.points.map((x, i) => `<li>${tldrPart(a, "pt" + i, esc(x))}</li>`).join("")}</ul>`;
+      if (d.why) h += `<div class="tl-why">${readingTldr(a) ? `<p>${tldrPart(a, "why", "")}</p>` : `<b>Why it matters</b><p>${esc(d.why)}</p>`}</div>`;
       if (d.sections && d.sections.length) h += `<div class="tl-secs"><b>What the article covers</b><ul>${d.sections.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
       h += d.kind === "ai" ? `<button class="sm" data-act="tldrretry" data-id="${a.id}">Summarise again</button>`
         : S.settings.hasKey ? `<button class="sm" data-act="tldrretry" data-id="${a.id}">✦ Summarise with AI</button>`
@@ -2107,21 +2185,24 @@ function clientApp() {
         if (S.settings.readOnOpen && !a.read) { a.read = true; keep.add(a.id); setTimeout(() => view === "story" ? render() : refreshCard(a), 300); }
         send("open", { id }); break;
       case "read": a.read = !a.read; keep.add(a.id); send("read", { id, v: a.read }); refreshCard(a); if (tldrId) renderTldr(); break;
-      case "listengroup": { send("usage-listen", { kind: "group" }); const items = (groupIdx[v] || []).map(postItem); if (items.length) speak(label(+v)[0], items); break; }
-      case "listenstory": send("usage-listen", { kind: "story" }); if (S.story) speak("Story", storyItems(S.story)); break;
-      case "listentldr": { send("usage-listen", { kind: "summary" }); const d = tl[id]; if (a && d && d !== "loading" && !d.error) speak("TL;DR", tldrItems(a, d)); break; }
+      case "listengroup": { send("usage-listen", { kind: "group" }); const items = (groupIdx[v] || []).map(postItem); if (items.length) speak(label(+v)[0], items, undefined, "summaries"); break; }
+      case "listenstory": send("usage-listen", { kind: "story" }); if (S.story) speak("Story", storyItems(S.story), undefined, "story"); break;
+      case "listentldr": { send("usage-listen", { kind: "summary" }); const d = tl[id]; if (a && d && d !== "loading" && !d.error) speak(srcTitle(a), tldrItems(a, d), undefined, "tldr"); break; }
       case "listenarticle": send("usage-listen", { kind: "article" });   // speak right away (iOS only lets speech start from a tap), then the article follows
-        if (a) { speak("Full article", [{ id, title: a.title, text: "Loading the article." }]); send("articletext", { id }); } break;
+        if (a) { speak(srcTitle(a), [{ id, title: a.title, paras: [{ text: "Loading the article." }] }], undefined, "article"); send("articletext", { id }); } break;
       case "plpause": togglePause(); break;
       case "plnext": skipItem(); break;
       case "plstop": stopSpeaking(); break;
+      case "plread": raOpen = !raOpen; raHold = 0; renderReadAlong(); break;
+      case "raclose": raOpen = false; renderReadAlong(); break;
+      case "rsseek": { const sg = tts.segs[+t.dataset.s]; if (tts.on && sg) { raHold = 0; seekChar(sg.a0); } break; }
       case "plseek": { const r = t.getBoundingClientRect(); seekTo((e.clientX - r.left) / Math.max(1, r.width)); break; }
       case "voiceset": {
         const k = t.dataset.k, val = k === "voiceGender" || k === "speechEngine" ? v : +v;
         if (k === "speechEngine" && tts.on) stopSpeaking();
         S.settings[k] = val; send("set", { k, v: val }); renderCfg(); break;
       }
-      case "voicetest": speak("Voice test", [{ title: "Voice test", text: "Hello! This is how BlogPulse will read your news and stories to you." }]); break;
+      case "voicetest": speak("Voice test", [{ title: "Voice test", text: "Hello! This is how BlogPulse will read your news and stories to you." }], undefined, "test"); break;
       case "tldr":
         if (expanded.has(id)) expanded.delete(id);
         else { expanded.add(id); if (!tl[id] || tl[id].error) { tl[id] = "loading"; send("tldr", { id }); } }
@@ -2553,12 +2634,31 @@ body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 112px)}
 .pinbtn:active{transform:scale(.9)}
 .readbtn.done{color:var(--signal);font-weight:700}
 .tick.done::after{width:16px;height:16px;border-radius:8px;background:transparent;box-shadow:inset 0 0 0 2px var(--signal)}
+.rs{border-radius:4px;transition:background .2s,color .2s,opacity .2s;cursor:pointer;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.rs-done{opacity:.45}
+.rs-now{background:var(--signal-wash);color:var(--ink);box-shadow:0 0 0 2px var(--signal-wash),inset 0 -2px 0 var(--signal)}
+#readsheet{z-index:25}
+.ra-top{display:flex;flex-direction:column;gap:4px;min-width:0}
+.ra-top small{color:var(--muted);font-size:calc(13px * var(--ts));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ra-body{max-width:680px;margin:0 auto;padding:16px 20px 150px}
+.ra-h{font:700 calc(22px * var(--ts))/1.3 var(--display);margin:6px 0 10px}
+.ra-p{font-size:calc(18px * var(--ts));line-height:1.7;margin:0 0 16px;color:var(--ink)}
+html[data-font=serif] .ra-p{font-family:var(--serif)}
+.ra-sep{border:0;border-top:1px solid var(--rule);margin:22px 0}
+.ra-hint{text-align:center;margin-top:24px}
+.pl-mode{display:inline-block;align-self:flex-start;font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:5px;margin-bottom:2px;background:rgba(127,127,127,.28)}
+.pl-mode.m-article{background:#2DD4BF;color:#0E1116}
+.pl-mode.m-tldr{background:#A78BFA;color:#0E1116}
+.pl-mode.m-story{background:#F5C04A;color:#0E1116}
+.pl-mode.m-summaries{background:#7AB4FF;color:#0E1116}
+.sh-head .pl-mode{font-size:11.5px}
 .lsbtn{display:inline-flex;align-items:center;flex:none;min-height:32px;padding:4px 10px 4px 8px;border-radius:16px;background:var(--sheet);color:var(--ink-2);border:1.5px solid var(--rule);font-weight:700;font-size:calc(13px * var(--ts));white-space:nowrap}
 .lsbtn .ico{width:15px;height:15px;margin-right:4px}
 .lsbtn.mini{min-height:28px;padding:2px 7px}
 .lsbtn.mini .ico{margin-right:0}
 .lsbtn:active{transform:scale(.95)}
 .pl-info{flex:1;min-width:0}
+.pl-info .pl-mode[hidden]{display:none}
 .pl-info b,.pl-info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pl-info b{font-size:14.5px}
 .pl-info small{font-size:12px;opacity:.75}
@@ -2808,7 +2908,7 @@ textarea.cfgin.wide{resize:vertical}
   .splash *{animation:none!important;opacity:1!important;transform:none!important;stroke-dashoffset:0!important}
   .splash{animation:spOut .3s ease 1.6s forwards!important}
 }
-@media (prefers-reduced-motion: reduce){.pl-prog i{transition:none}.eq i{animation:none;height:60%}#ptr{transition:none}.updp{animation:none}.busy-dot{animation-duration:2.4s}.tlbtn,.tlbtn .chev{transition:none}#top.busy .rf-spin svg,.ln{animation:none}.sheet,#toast,#bar{transition:none}}
+@media (prefers-reduced-motion: reduce){.rs{transition:none}.pl-prog i{transition:none}.eq i{animation:none;height:60%}#ptr{transition:none}.updp{animation:none}.busy-dot{animation-duration:2.4s}.tlbtn,.tlbtn .chev{transition:none}#top.busy .rf-spin svg,.ln{animation:none}.sheet,#toast,#bar{transition:none}}
 `;
 
 // BlogPulse logo (pulse feed), drawn on its dark tile: header mark and the first-run screen
@@ -2858,10 +2958,12 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
 </div>
 <div id="tldr" class="sheet" aria-label="TL;DR"></div>
 <div id="aisheet" class="sheet" aria-label="AI settings"></div>
+<div id="readsheet" class="sheet" aria-label="Text being read"></div>
 <div id="cfgsheet" class="sheet" aria-label="Settings"></div>
 <div id="player" hidden role="region" aria-label="Reading aloud">
   <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
-  <div class="pl-info"><b id="plTitle"></b><small id="plSub"></small></div>
+  <div class="pl-info"><span id="plMode" class="pl-mode" hidden></span><b id="plTitle"></b><small id="plSub"></small></div>
+  <button class="pl-btn" data-act="plread" aria-label="Show the text being read"><svg viewBox="0 0 24 24"><path d="M5 5h14M5 9.5h14M5 14h10M5 18.5h7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg></button>
   <button id="plPause" class="pl-btn" data-act="plpause" aria-label="Pause"></button>
   <button class="pl-btn" data-act="plnext" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M6 5l9 7-9 7zM16 5h3v14h-3z"/></svg></button>
   <button class="pl-btn" data-act="plstop" aria-label="Stop"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg></button>
