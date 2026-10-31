@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.15.0';
+const VERSION = '1.15.1';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -48,6 +48,7 @@ const BLUEPRINTS = [
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.6.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.8.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.12.0' },
+  { id: 'read-aloud', name: 'Read aloud', version: '1.0.0', since: '1.15.1' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.14.0' },
 ];
 
@@ -2669,8 +2670,6 @@ html[data-font=serif] .ra-p{font-family:var(--serif)}
 .eq i:nth-child(2){animation-delay:-.35s}.eq i:nth-child(3){animation-delay:-.7s}
 #player.paused .eq i{animation:none;height:40%}
 @keyframes eq{0%,100%{height:30%}50%{height:100%}}
-body.playing #list{padding-bottom:96px}
-body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 84px)}
 #toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 22px);transform:translate(-50%,20px);opacity:0;pointer-events:none;z-index:20;
   background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:12px;font-size:14px;font-weight:500;max-width:88vw;text-align:center;transition:opacity .2s,transform .2s}
 #toast.on{opacity:1;transform:translate(-50%,0)}
