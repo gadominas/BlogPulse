@@ -4,6 +4,36 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.15.0",
+      "date": "2026-10-31",
+      "title": "Follow along as you listen",
+      "highlights": [
+        {
+          "icon": "🏷",
+          "title": "Always know what's playing",
+          "text": "The player says Full article, TL;DR, Story or Summaries, and buttons are named to match."
+        },
+        {
+          "icon": "🖍",
+          "title": "Read along",
+          "text": "The sentence being read is highlighted and read text dims, in the TL;DR and in a new text view."
+        },
+        {
+          "icon": "👆",
+          "title": "Tap a sentence",
+          "text": "Jump straight to any sentence in the text you're listening to."
+        }
+      ],
+      "changes": [
+        "Buttons renamed: Article (full article) on each post, Listen to TL;DR, Summaries next to each day",
+        "Coloured mode label in the player: Full article, TL;DR, Story, Summaries",
+        "While a TL;DR is read, its text highlights sentence by sentence, inline and in the TL;DR screen",
+        "Text button in the player opens the text being read (the article's own paragraphs for a full article), following the voice; it pauses following for 6 s when you scroll",
+        "Tap any sentence to jump there"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.14.0",
       "date": "2026-10-31",
       "title": "Anonymous usage, if you agree",

@@ -2,6 +2,20 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.15.0 (2026-10-31): Follow along as you listen
+
+- 🏷 **Always know what's playing**: The player says Full article, TL;DR, Story or Summaries, and buttons are named to match.
+- 🖍 **Read along**: The sentence being read is highlighted and read text dims, in the TL;DR and in a new text view.
+- 👆 **Tap a sentence**: Jump straight to any sentence in the text you're listening to.
+
+**Changes**
+
+- Buttons renamed: Article (full article) on each post, Listen to TL;DR, Summaries next to each day
+- Coloured mode label in the player: Full article, TL;DR, Story, Summaries
+- While a TL;DR is read, its text highlights sentence by sentence, inline and in the TL;DR screen
+- Text button in the player opens the text being read (the article's own paragraphs for a full article), following the voice; it pauses following for 6 s when you scroll
+- Tap any sentence to jump there
+
 ## 1.14.0 (2026-10-31): Anonymous usage, if you agree
 
 - 📊 **Help shape BlogPulse**: If you agree, BlogPulse sends anonymous counts of the features you use. Nothing else.
