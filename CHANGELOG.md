@@ -2,6 +2,17 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.16.1 (2026-11-01): Easier questions
+
+- ⌨️ **Send from the keyboard**: In the reader, the keyboard's Send key asks your question.
+- 📝 **Room to type**: The question box grows as you write longer questions.
+- 🧩 **Shared reader**: Settings › Built with lists Read aloud and reader 1.1.0.
+
+**Changes**
+
+- The reader's question box grows with what you type (up to a few lines) and the keyboard shows Send
+- Settings › Built with lists the Read aloud and reader blueprint 1.1.0 (BlogPulse is its reference app)
+
 ## 1.16.0 (2026-11-01): A reader inside BlogPulse
 
 - 📖 **Read without leaving**: Posts open in a clean reader with the article's own text.

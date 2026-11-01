@@ -4,6 +4,33 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.16.1",
+      "date": "2026-11-01",
+      "title": "Easier questions",
+      "highlights": [
+        {
+          "icon": "⌨️",
+          "title": "Send from the keyboard",
+          "text": "In the reader, the keyboard's Send key asks your question."
+        },
+        {
+          "icon": "📝",
+          "title": "Room to type",
+          "text": "The question box grows as you write longer questions."
+        },
+        {
+          "icon": "🧩",
+          "title": "Shared reader",
+          "text": "Settings › Built with lists Read aloud and reader 1.1.0."
+        }
+      ],
+      "changes": [
+        "The reader's question box grows with what you type (up to a few lines) and the keyboard shows Send",
+        "Settings › Built with lists the Read aloud and reader blueprint 1.1.0 (BlogPulse is its reference app)"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.16.0",
       "date": "2026-11-01",
       "title": "A reader inside BlogPulse",
