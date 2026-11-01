@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.16.0';
+const VERSION = '1.16.1';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -48,7 +48,7 @@ const BLUEPRINTS = [
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.6.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.8.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.12.0' },
-  { id: 'read-aloud', name: 'Read aloud', version: '1.0.0', since: '1.15.1' },
+  { id: 'read-aloud', name: 'Read aloud', version: '1.1.0', since: '1.16.1' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.14.0' },
 ];
 
@@ -2032,7 +2032,7 @@ function clientApp() {
         : m.error ? `<div class="rd-ab err">${esc(m.error)} <button class="link" data-act="rdretry" data-v="${i}">Try again</button></div>`
         : `<div class="rd-ab"><span class="ai-lbl">✦ AI answer by ${esc(PN[m.provider] || "AI")}</span>${mdLite(m.a)}</div>`)).join("")}</div>
       ${msgs.length ? "" : `<div class="rd-sugg">${RD_SUGG.map(q => `<button class="chip" data-act="rdsugg" data-v="${esc(q)}">${esc(q)}</button>`).join("")}</div>`}
-      <div class="rd-ask"><textarea id="rdQ" rows="1" placeholder="Ask anything about this article" aria-label="Your question" maxlength="600"></textarea><button class="rd-send" data-act="rdsend" aria-label="Ask"><svg viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button></div>`;
+      <div class="rd-ask"><textarea id="rdQ" rows="1" placeholder="Ask anything about this article" aria-label="Your question" maxlength="600" enterkeyhint="send"></textarea><button class="rd-send" data-act="rdsend" aria-label="Ask"><svg viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button></div>`;
     if (keep) $("#rdQ").value = keep;
   }
   function rdAsk(q) {
@@ -2046,6 +2046,9 @@ function clientApp() {
     renderReaderChat();
     const w = document.querySelector("#rdChat .rd-ab.wait"); if (w && w.scrollIntoView) w.scrollIntoView({ block: "center", behavior: "smooth" });
   }
+  // the question box grows with what's typed, and the keyboard's Send key asks
+  document.addEventListener("input", e => { if (e.target.id === "rdQ") { e.target.style.height = "auto"; e.target.style.height = Math.min(120, e.target.scrollHeight) + "px"; } });
+  document.addEventListener("keydown", e => { if (e.target.id === "rdQ" && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); rdAsk(e.target.value); } });
   window.onAsk = (id, res) => {
     const m = (rdChat[id] || []).find(x => x.pending); if (!m) return;
     m.pending = false;
