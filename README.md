@@ -97,6 +97,7 @@ What else you need:
 | See only one topic | Tap a topic at the top, or swipe left or right on the list |
 | Read the gist | Tap **TL;DR** on the post |
 | Read the whole article | Tap the title |
+| Read a post | Tap it: it opens in BlogPulse's reader with the post's own text, **Listen** (the text highlights as it's read) and **✦ Ask AI** for questions about it. If the site needs consent or a sign-in, the reader says so and offers **Open the article**. Prefer Safari? Turn off **Settings › Reading › Open posts in the reader** |
 | Save a post for later | Tap the bookmark on the post. It waits in the **Read later** tab; tap **Done** when you've read it, or **Clear finished** to remove every read one |
 | Mark as read | Tap **Mark read**, **Mark N read** next to a day to clear that day, or **Mark all read** at the top of the list to clear the page you're on, after a warning |
 | Rate | Tap one, two or three stars. Tap the same star again to clear it |

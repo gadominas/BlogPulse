@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.15.1';
+const VERSION = '1.16.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -383,7 +383,7 @@ async function loadData() {
   dataLoaded = loadIssues.length === 0;   // anything missing: show what we have, save nothing over it
 }
 const settings = Object.assign(
-  { groupBy: "day", view: "unread", readOnOpen: false, ai: true, aiProvider: "anthropic", lastSession: 0, lastScan: 0,
+  { groupBy: "day", view: "unread", readOnOpen: false, openInReader: true, ai: true, aiProvider: "anthropic", lastSession: 0, lastScan: 0,
     checkUpdates: true,   // offer new versions from GitHub each time BlogPulse opens
     shareUsage: false, usageAsked: false,  // anonymous usage counts: off until the person agrees
     speechEngine: "device", ttsModel: "gpt-4o-mini-tts", ttsVoice: "coral", ttsInstructions: "",   // read aloud: iPhone voices or OpenAI
@@ -785,6 +785,69 @@ function extractArticle(html) {
   return { desc, paras, heads, text, words: text ? text.split(/\s+/).length : 0 };
 }
 
+// ---------- Reader: the post's own text inside BlogPulse ----------
+// Paragraphs, subheadings, lists, quotes and code in page order; menus, footers and sharing bars are dropped.
+function extractReader(html) {
+  const meta = name => { const m = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]*>`, "i")); return m ? toText(attr(m[0], "content")) : ""; };
+  let image = meta("og:image") || meta("twitter:image");
+  if (!/^https:\/\//i.test(image)) image = "";
+  const byline = meta("author") || meta("article:author");
+  let h = html.replace(/<(script|style|noscript|svg|nav|header|footer|aside|form|iframe|figure|button)\b[\s\S]*?<\/\1>/gi, " ");
+  const main = h.match(/<article[\s>][\s\S]*<\/article>/i) || h.match(/<main[\s>][\s\S]*<\/main>/i);
+  if (main) h = main[0];
+  const blocks = [], junk = /^(share|subscribe|sign up|follow us|related( posts| articles)?|advertisement|comments?|read more|tags?:)\b/i;
+  for (const m of h.matchAll(/<(p|h2|h3|h4|li|pre|blockquote)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
+    const tag = m[1].toLowerCase();
+    if (tag === "pre") {   // code keeps its line breaks
+      const code = decode(m[2].replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "")).replace(/\n{3,}/g, "\n\n").replace(/^\n+|\s+$/g, "");
+      if (code) blocks.push({ t: "pre", text: code.slice(0, 4000) });
+      continue;
+    }
+    const text = toText(m[2]);
+    if (!text || (text.length < 60 && junk.test(text))) continue;
+    if (blocks.length && blocks[blocks.length - 1].text === text) continue;
+    if (tag[0] === "h") { if (text.length > 2 && text.length < 120) blocks.push({ t: "h", text }); }
+    else if (tag === "li") { if (text.length >= 15) blocks.push({ t: "li", text }); }
+    else if (tag === "blockquote") { if (text.length >= 20) blocks.push({ t: "q", text }); }
+    else if (text.length >= 30) blocks.push({ t: "p", text });
+  }
+  const words = blocks.filter(b => b.t !== "h" && b.t !== "pre").reduce((n, b) => n + b.text.split(/\s+/).length, 0);
+  return { blocks: blocks.slice(0, 400), image, byline, words, minutes: Math.max(1, Math.round(words / 230)) };
+}
+const readerCache = {};   // id → the article's text, for questions about it (this session only)
+async function readArticle(a) {   // { blocks, image, byline, words, minutes } or { blocked: why }
+  let r;
+  try { r = await fetchText(a.link, 20); }
+  catch (e) {
+    const code = (String(e.message || e).match(/HTTP (\d+)/) || [])[1];
+    return { blocked: ["401", "402", "403", "451"].includes(code) ? "signin" : "unreachable" };
+  }
+  const rd = extractReader(r.text);
+  if (rd.words >= 120) {
+    readerCache[a.id] = rd.blocks.filter(b => b.t !== "pre").map(b => b.text).join("\n\n");
+    return rd;
+  }
+  const html = r.text;
+  const why = /subscribe to (continue|read)|subscribers?[- ]only|paywall|(sign|log) in to (continue|read)|create a (free )?account to/i.test(html) ? "signin"
+    : /cookie|consent|gdpr|privacy (choices|settings)|accept all/i.test(html) ? "consent" : "unreadable";
+  return { blocked: why };
+}
+// Questions about one article, answered from its text
+async function askArticle(a, q, hist) {
+  if (!aiKey()) throw new Error("Add an AI key in Settings › AI settings");
+  if (!q) throw new Error("Type a question first");
+  if (!readerCache[a.id]) await readArticle(a);
+  const text = readerCache[a.id] || "";
+  const src = (sources.find(s => s.id === a.src) || {}).title || hostOf(a.link);
+  const basis = text ? text.slice(0, 24000) : `Only the feed excerpt is available (the full article couldn't be read):\n${a.ex || a.ai || a.desc || "(none)"}`;
+  const system = "You answer questions about one article for a busy reader. Use the article as your source. If the article doesn't answer the question, say so in one sentence, then answer briefly from general knowledge and say that part isn't from the article. Be concise: one to four short paragraphs, or a few bullets starting with \"- \". Plain text, no headings, no tables. Answer in the language of the question.";
+  const past = hist.map(h => `Q: ${String(h.q || "").slice(0, 600)}\nA: ${String(h.a || "").slice(0, 1500)}`).join("\n\n");
+  const user = `Article: ${a.title}\nPublished by: ${src}\n\n${basis}\n\n${past ? "Earlier in this conversation:\n" + past + "\n\n" : ""}Question: ${q}`;
+  const out = (await aiCall(system, user, 900, "chat")).trim();
+  if (!out) throw new Error("the AI returned an empty answer");
+  return out;
+}
+
 function extractiveTldr(a, art) {
   if (!art || !art.paras.length) return { lead: a.desc || a.title, points: [], sections: [] };
   const sents = [];
@@ -963,7 +1026,7 @@ function clientState() {
     cfgSchema: CONFIG.map(([title, items]) => ({ title, items })),
     categories: CATS.map(c => ({ id: c[0], label: c[1], color: c[2] })),
     settings: {
-      groupBy: settings.groupBy, view: settings.view, readOnOpen: settings.readOnOpen, ai: settings.ai, aiProvider: settings.aiProvider, hasKey: !!aiKey(), shareUsage: !!settings.shareUsage, checkUpdates: settings.checkUpdates !== false,
+      groupBy: settings.groupBy, view: settings.view, readOnOpen: settings.readOnOpen, openInReader: settings.openInReader !== false, ai: settings.ai, aiProvider: settings.aiProvider, hasKey: !!aiKey(), shareUsage: !!settings.shareUsage, checkUpdates: settings.checkUpdates !== false,
       voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1, voiceGender: settings.voiceGender || "all",
       speechEngine: settings.speechEngine || "device", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
       ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"),
@@ -1028,9 +1091,25 @@ async function handle(m) {
     case "rate": if (a) { a.rating = m.v || 0; if (a.rating) { a.read = 1; track("post_rated", { stars: a.rating }); } }
       { const pk = computePicks(Object.values(articles), cfg("picksMinRatings"), cfg("picksThreshold")); call("onPicks", pk); } break;
     case "markAll": for (const id of m.ids || []) if (articles[id]) articles[id].read = 1; break;
-    case "open": if (a && a.link) { if (settings.readOnOpen) { a.read = 1; saveWidget(widgetSnapshot()); } saveAll(); track("post_opened"); await Safari.openInApp(a.link, false); } return;
+    case "open": if (a && a.link) { if (settings.readOnOpen) { a.read = 1; saveWidget(widgetSnapshot()); } saveAll(); if (!m.orig) track("post_opened"); await Safari.openInApp(a.link, false); } return;   // orig: from the reader's Original button
+    case "reader": {   // a post opened in the reader: mark it, then fetch its text (unless the page already has it)
+      if (!a) return;
+      if (settings.readOnOpen && !a.read) { a.read = 1; saveAll(); saveWidget(widgetSnapshot()); }
+      track("post_opened");
+      if (m.cached) return;
+      const res = await readArticle(a);
+      if (res.blocked) res.excerpt = a.ex || a.ai || a.desc || "";
+      return call("onReader", a.id, res);
+    }
+    case "askarticle": {   // a question about the post open in the reader
+      if (!a) return;
+      let res;
+      try { res = { text: await askArticle(a, String(m.q || "").trim().slice(0, 600), Array.isArray(m.hist) ? m.hist.slice(-6) : []), provider: settings.aiProvider }; }
+      catch (e) { res = { error: String(e.message || e) }; }
+      return call("onAsk", a.id, res);
+    }
     case "set": if (m.k === "shareUsage") { setUsage(m.v === true || m.v === "true" || m.v === "1"); return push(); }
-      if (["groupBy", "view", "readOnOpen", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "speechEngine", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v; break;
+      if (["groupBy", "view", "readOnOpen", "openInReader", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "speechEngine", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v; break;
     case "refresh": return runScan();
     case "usage-consent": setUsage(m.on === "1"); flushUsage(); return push();
     case "usage-test": {
@@ -1082,14 +1161,11 @@ async function handle(m) {
       track("summary_made", { provider: a.tldr && a.tldr.kind === "extract" ? "none" : settings.aiProvider });
       saveAll(); return call("onTldr", a.id, a.tldr);
     }
-    case "articletext": {   // the article's own text, for "Listen to the full article"
+    case "articletext": {   // the article's own text, for "Listen to the full article" (same blocks as the reader)
       if (!a) return;
       const excerpt = a.ex || a.ai || a.desc || "";
-      let res;
-      try {
-        const r = await fetchText(a.link, 20), art = extractArticle(r.text);
-        res = art.words > 80 ? { paras: art.paras.slice(0, 80) } : excerpt ? { paras: [excerpt], partial: true } : { error: "This article couldn't be read" };
-      } catch (e) { res = excerpt ? { paras: [excerpt], partial: true } : { error: "This article couldn't be loaded" }; }
+      const r = await readArticle(a);
+      const res = !r.blocked ? { blocks: r.blocks } : excerpt ? { paras: [excerpt], partial: true } : { error: "This article couldn't be read" };
       return call("onArticleText", a.id, res);
     }
     case "state": return push();
@@ -1260,6 +1336,7 @@ function clientApp() {
       <p class="hint">Changes apply right away and are kept on this iPhone.</p>
       <h3 class="sec">Appearance</h3>${lookHTML()}
       <h3 class="sec">Reading</h3>
+      <div class="srow"><div class="grow"><b>Open posts in the reader</b><small class="muted">The post's own text in BlogPulse, with Listen and questions. Off: open it in Safari</small></div><button class="switch ${S.settings.openInReader !== false ? "on" : ""}" data-act="toggle" data-v="openInReader" aria-label="Open posts in the reader"></button></div>
       <div class="srow"><div class="grow"><b>Mark as read when opened</b><small class="muted">Off: you mark posts read yourself</small></div><button class="switch ${S.settings.readOnOpen ? "on" : ""}" data-act="toggle" data-v="readOnOpen" aria-label="Mark as read when opened"></button></div>
       <div class="srow"><div class="grow"><b>Picks</b><small class="muted">${S.picksReady ? `Learning from ${S.rated} ratings` : `Rate ${Math.max(0, S.cfg.picksMinRatings - S.rated)} more post${S.cfg.picksMinRatings - S.rated === 1 ? "" : "s"} to switch on`}</small></div></div>
       <h3 class="sec">Listening</h3>${listenHTML()}
@@ -1284,7 +1361,7 @@ function clientApp() {
   }
   let aiOpen = false, aiArmed = null; const aiLoading = new Set();
   const PN = { anthropic: "Claude", openai: "OpenAI" };
-  const FEAT = { summaries: "Summaries and categories", story: "Story", tldr: "TL;DR", invite: "Invites", test: "Connection tests", speech: "Read aloud", other: "Other" };
+  const FEAT = { summaries: "Summaries and categories", story: "Story", tldr: "TL;DR", chat: "Article questions", invite: "Invites", test: "Connection tests", speech: "Read aloud", other: "Other" };
   const fmtN = n => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e4 ? Math.round(n / 1e3) + "k" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
   function arm(key) { aiArmed = key; renderAI(); setTimeout(() => { if (aiArmed === key) { aiArmed = null; renderAI(); } }, 3500); }
   function usageBlock(p, P) {
@@ -1740,6 +1817,7 @@ function clientApp() {
     tts.nowSeg = now;
     for (let i = lo; i <= hi; i++) document.querySelectorAll(`.rs[data-s="${i}"]`).forEach(el => { el.classList.toggle("rs-done", i < now); el.classList.toggle("rs-now", i === now); });
     if (raOpen && Date.now() > raHold) { const el = document.querySelector(`#readsheet .rs[data-s="${now}"]`); if (el && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+    else if (!raOpen && rdId && tts.id === rdId && Date.now() > rdHold) { const el = document.querySelector(`#reader .rs[data-s="${now}"]`); if (el && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "smooth" }); }
   }
   function seekTo(f) { if (tts.on && tts.total) seekChar(f * tts.total); }   // tap on the bar
   function seekChar(c) {   // jump to that sentence (or that second, within the piece playing)
@@ -1762,6 +1840,7 @@ function clientApp() {
     if (!on) return;
     const part = tts.parts[tts.i] || {}, it = tts.items[part.k] || {};
     $("#plTitle").textContent = it.title || tts.label;
+    if (rdId) renderReaderTools();
     const mode = MODES[tts.kind] || "";
     $("#plMode").textContent = mode; $("#plMode").hidden = !mode;
     $("#plMode").className = "pl-mode m-" + (tts.kind || "x");
@@ -1798,11 +1877,16 @@ function clientApp() {
   const tldrPart = (a, key, plain) => readingTldr(a) ? segSpans(sg => sg.k === 0 && sg.key === key) || plain : plain;
   function refreshReadingViews() {
     if (tts.kind === "tldr" && tts.id) { if (expanded.has(tts.id)) refreshInline(tts.id); if (tldrId === tts.id) renderTldr(); }
+    if (tts.kind === "article" && rdId && tts.id === rdId) renderReaderText();
     if (raOpen) renderReadAlong();
   }
   // Read-along: the whole text being read, following the voice; read sentences dim.
   let raOpen = false, raHold = 0;
-  document.addEventListener("touchstart", e => { if (raOpen && e.target.closest && e.target.closest("#readsheet")) raHold = Date.now() + 6000; }, { passive: true });
+  document.addEventListener("touchstart", e => {
+    if (!e.target.closest) return;
+    if (raOpen && e.target.closest("#readsheet")) raHold = Date.now() + 6000;
+    if (rdId && e.target.closest("#reader")) rdHold = Date.now() + 6000;   // reading by hand: stop following the voice for a moment
+  }, { passive: true });
   function renderReadAlong() {
     const el = $("#readsheet");
     el.classList.toggle("open", raOpen); lockBody();
@@ -1826,8 +1910,147 @@ function clientApp() {
   window.onArticleText = (id, r) => {
     const a = byId(id); if (!a) return;
     if (r.error) return toast(r.error);
-    speak(srcTitle(a), [{ id, title: a.title, paras: head(a).concat(r.paras.map((t, i) => ({ key: "p" + i, text: t }))) }], undefined, "article");
+    const paras = r.blocks ? articleParas(r.blocks) : r.paras.map((t, i) => ({ key: "x" + i, text: t }));
+    speak(srcTitle(a), [{ id, title: a.title, paras: head(a).concat(paras) }], undefined, "article");
     if (r.partial) toast("The full page couldn't be read, so this is the excerpt");
+  };
+  // Article blocks → paragraphs to read: keyed b<i> so the reader can highlight its own text; code isn't read
+  const articleParas = blocks => blocks.map((b, i) => b.t === "pre" ? null : { key: "b" + i, text: b.text, head: b.t === "h" }).filter(Boolean);
+
+  // ── Reader: the post's own text inside BlogPulse, with Listen and questions to AI ──
+  let rdId = "", rdHold = 0, rdListenSoon = "";
+  const STOP_SM = `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10H7z"/></svg>`;
+  const pageHost = u => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return "the site"; } };
+  const rdData = {}, rdChat = {};
+  const RD_WHY = {
+    consent: ["This site asks for consent first", "It shows a consent screen before the article, and only you can answer it. Open the article to read it there."],
+    signin: ["This article needs you to sign in", "The site keeps it for subscribers or signed-in readers. Open the article to read it there."],
+    unreachable: ["The article couldn't be loaded", "The site didn't answer. Open the article to try it in Safari."],
+    unreadable: ["This page couldn't be read here", "Its text is built in a way BlogPulse can't read. Open the article to read it there."],
+  };
+  const RD_SUGG = ["What's the main point?", "What can I apply from this?", "Explain the key terms", "What's missing or debatable?"];
+  const rdReading = () => tts.on && tts.kind === "article" && !!rdId && tts.id === rdId;
+  function openReader(id) {
+    rdId = id; rdHold = 0;
+    const cached = rdData[id] && !rdData[id].loading;
+    if (!cached) rdData[id] = { loading: true };
+    send("reader", { id, cached });
+    renderReader();
+    $("#reader").scrollTop = 0;
+  }
+  window.onReader = (id, res) => {
+    rdData[id] = res;
+    if (rdListenSoon === id) { rdListenSoon = ""; if (rdId === id) { readerSpeak(); } }
+    if (rdId === id) { renderReaderMeta(); renderReaderText(); renderReaderChat(); }
+  };
+  function renderReader() {
+    const el = $("#reader");
+    el.classList.toggle("open", !!rdId); lockBody();
+    if (!rdId) return;
+    const a = byId(rdId); if (!a) { rdId = ""; el.classList.remove("open"); return lockBody(); }
+    el.innerHTML = `<div class="sh-head rd-head"><span class="rd-src">${esc(srcTitle(a))}</span><button class="link" data-act="rdclose">Done</button></div>
+      <article class="rd-body">
+        <h1 class="rd-title">${esc(a.title)}</h1>
+        <p class="rd-meta" id="rdMeta"></p>
+        <div class="rd-tools" id="rdTools"></div>
+        <div id="rdText" class="rd-text"></div>
+        <section id="rdChat" class="rd-chat" aria-label="Questions about this article"></section>
+        <p class="rd-foot"><button class="link" data-act="rdorig">Read it on ${esc(pageHost(a.link))} ↗</button></p>
+      </article>`;
+    renderReaderMeta(); renderReaderTools(); renderReaderText(); renderReaderChat();
+  }
+  function renderReaderMeta() {
+    const a = byId(rdId), d = rdData[rdId] || {}, el = $("#rdMeta"); if (!a || !el) return;
+    el.textContent = [d.byline, rel(a.pub), d.minutes ? d.minutes + " min read" : ""].filter(Boolean).join(" · ");
+  }
+  function renderReaderTools() {
+    const a = byId(rdId), el = $("#rdTools"); if (!a || !el) return;
+    el.innerHTML = `<button class="lsbtn ${rdReading() ? "on" : ""}" data-act="rdlisten">${rdReading() ? `${STOP_SM}Stop listening` : `${SPK}Listen`}</button>
+      ${S.settings.hasKey ? `<button class="lsbtn" data-act="rdask">✦ Ask AI</button>` : ""}
+      <button class="lsbtn" data-act="rdorig" aria-label="Open the original article">Original ↗</button>
+      <span class="rd-pin">${pinBtn(a)}</span>`;
+  }
+  function renderReaderText() {
+    const el = $("#rdText"); if (!el) return;
+    const a = byId(rdId), d = rdData[rdId] || {};
+    if (d.loading) { el.innerHTML = `<p class="note rd-wait"><span class="busy-dot"></span> Getting the article from ${esc(pageHost(a.link))}…</p><div class="rd-skel"><i></i><i></i><i></i><i></i><i></i></div>`; return; }
+    if (d.blocked) {
+      const [h, p] = RD_WHY[d.blocked] || RD_WHY.unreadable;
+      el.innerHTML = `<div class="rd-blocked"><b>${esc(h)}</b><p>${esc(p)}</p><button class="sm primary" data-act="rdorig">Open the article ↗</button></div>
+        ${d.excerpt ? `<h2 class="rd-h">From the feed</h2>${rdBlocks([{ t: "p", text: d.excerpt }], "x")}` : ""}`;
+      return;
+    }
+    el.innerHTML = (d.image ? `<img class="rd-img" src="${esc(d.image)}" alt="" loading="lazy" onerror="this.remove()">` : "") + rdBlocks(d.blocks || [], "b");
+  }
+  function rdBlocks(blocks, pre) {   // while this article is read, its sentences are spans that highlight and dim
+    const reading = rdReading();
+    let html = "", list = false;
+    blocks.forEach((b, i) => {
+      const plain = esc(b.text);
+      const txt = b.t === "pre" ? plain : reading ? (segSpans(sg => sg.k === 0 && sg.key === pre + i) || plain) : plain;
+      if (b.t === "li" && !list) { html += "<ul class=\"rd-ul\">"; list = true; }
+      if (b.t !== "li" && list) { html += "</ul>"; list = false; }
+      html += b.t === "h" ? `<h2 class="rd-h">${txt}</h2>` : b.t === "pre" ? `<pre class="rd-pre">${txt}</pre>` : b.t === "q" ? `<blockquote class="rd-q">${txt}</blockquote>` : b.t === "li" ? `<li>${txt}</li>` : `<p class="rd-p">${txt}</p>`;
+    });
+    return html + (list ? "</ul>" : "");
+  }
+  function readerParas() {
+    const d = rdData[rdId] || {};
+    return d.blocks ? articleParas(d.blocks) : d.excerpt ? [{ key: "x0", text: d.excerpt }] : null;
+  }
+  function readerSpeak() {
+    const a = byId(rdId), paras = readerParas(); if (!a || !paras) return;
+    speak(srcTitle(a), [{ id: a.id, title: a.title, paras: head(a).concat(paras) }], undefined, "article");
+    if ((rdData[rdId] || {}).blocked) toast("Only the feed excerpt could be read");
+  }
+  function readerListen() {
+    if (rdReading()) { stopSpeaking(); renderReaderTools(); return; }
+    send("usage-listen", { kind: "article" });
+    if (readerParas()) return readerSpeak();
+    const a = byId(rdId);   // still loading: start speaking inside the tap, the article follows (iOS needs the tap)
+    rdListenSoon = rdId;
+    speak(srcTitle(a), [{ id: a.id, title: a.title, paras: [{ text: "Loading the article." }] }], undefined, "article");
+  }
+  function mdLite(t) {   // AI answers: paragraphs, "- " bullets and **bold**, everything else escaped
+    const inl = x => esc(x).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+    return String(t || "").replace(/\r/g, "").split(/\n{2,}/).map(b => {
+      const lines = b.split("\n").filter(l => l.trim());
+      if (lines.length && lines.every(l => /^\s*[-*•]\s+/.test(l))) return "<ul>" + lines.map(l => "<li>" + inl(l.replace(/^\s*[-*•]\s+/, "")) + "</li>").join("") + "</ul>";
+      return "<p>" + lines.map(inl).join("<br>") + "</p>";
+    }).join("");
+  }
+  function renderReaderChat() {
+    const el = $("#rdChat"); if (!el) return;
+    const d = rdData[rdId] || {};
+    if (!S.settings.hasKey) { el.innerHTML = `<p class="note rd-nokey">✦ To ask questions about this article, add an AI key in <b>Settings › AI settings</b>.</p>`; return; }
+    if (d.loading) { el.innerHTML = ""; return; }
+    const keep = $("#rdQ") ? $("#rdQ").value : "";
+    const msgs = rdChat[rdId] || [];
+    el.innerHTML = `<h3 class="rd-chat-h">✦ Ask about this article</h3>
+      ${d.blocked ? `<p class="note">Only the feed excerpt could be read, so answers may be limited.</p>` : ""}
+      <div class="rd-msgs">${msgs.map((m, i) => `<div class="rd-qb">${esc(m.q)}</div>` + (m.pending ? `<div class="rd-ab wait"><span class="busy-dot"></span> Thinking…</div>`
+        : m.error ? `<div class="rd-ab err">${esc(m.error)} <button class="link" data-act="rdretry" data-v="${i}">Try again</button></div>`
+        : `<div class="rd-ab"><span class="ai-lbl">✦ AI answer by ${esc(PN[m.provider] || "AI")}</span>${mdLite(m.a)}</div>`)).join("")}</div>
+      ${msgs.length ? "" : `<div class="rd-sugg">${RD_SUGG.map(q => `<button class="chip" data-act="rdsugg" data-v="${esc(q)}">${esc(q)}</button>`).join("")}</div>`}
+      <div class="rd-ask"><textarea id="rdQ" rows="1" placeholder="Ask anything about this article" aria-label="Your question" maxlength="600"></textarea><button class="rd-send" data-act="rdsend" aria-label="Ask"><svg viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button></div>`;
+    if (keep) $("#rdQ").value = keep;
+  }
+  function rdAsk(q) {
+    q = String(q || "").trim(); if (!q || !rdId) return;
+    const list = rdChat[rdId] = rdChat[rdId] || [];
+    if (list.some(m => m.pending)) return toast("One question at a time");
+    const hist = list.filter(m => m.a).slice(-6).map(m => ({ q: m.q, a: m.a }));
+    list.push({ q, pending: true });
+    send("askarticle", { id: rdId, q, hist });
+    if ($("#rdQ")) $("#rdQ").value = "";
+    renderReaderChat();
+    const w = document.querySelector("#rdChat .rd-ab.wait"); if (w && w.scrollIntoView) w.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+  window.onAsk = (id, res) => {
+    const m = (rdChat[id] || []).find(x => x.pending); if (!m) return;
+    m.pending = false;
+    if (res.error) m.error = res.error; else { m.a = res.text; m.provider = res.provider; }
+    if (rdId === id) { renderReaderChat(); const all = document.querySelectorAll("#rdChat .rd-qb"), last = all[all.length - 1]; if (last && last.scrollIntoView) last.scrollIntoView({ block: "start", behavior: "smooth" }); }
   };
 
   window.onTldr = (id, d) => { tl[id] = d; if (tldrId === id) renderTldr(); if (expanded.has(id)) refreshInline(id); };
@@ -2074,7 +2297,7 @@ function clientApp() {
   }
 
   // ---- TL;DR sheet ----
-  const lockBody = () => document.body.classList.toggle("locked", sheetOpen || !!tldrId || aiOpen || cfgOpen || raOpen);
+  const lockBody = () => document.body.classList.toggle("locked", sheetOpen || !!tldrId || aiOpen || cfgOpen || raOpen || !!rdId);
   function openTldr(id, force) {
     if (tldrId !== id) Object.assign(inv, { open: false, who: "", instr: "", busy: false, out: {} });   // fresh invite for each article
     tldrId = id;
@@ -2184,7 +2407,15 @@ function clientApp() {
       case "open":
         if (!a) return;
         if (S.settings.readOnOpen && !a.read) { a.read = true; keep.add(a.id); setTimeout(() => view === "story" ? render() : refreshCard(a), 300); }
-        send("open", { id }); break;
+        if (S.settings.openInReader === false) send("open", { id }); else openReader(id);
+        break;
+      case "rdclose": rdId = ""; renderReader(); break;
+      case "rdorig": send("open", { id: rdId, orig: true }); break;
+      case "rdlisten": readerListen(); break;
+      case "rdask": { const c = $("#rdChat"); if (c && c.scrollIntoView) c.scrollIntoView({ block: "start", behavior: "smooth" }); setTimeout(() => { const q = $("#rdQ"); if (q) q.focus(); }, 450); break; }
+      case "rdsugg": rdAsk(v); break;
+      case "rdsend": { const q = $("#rdQ"); if (q) rdAsk(q.value); break; }
+      case "rdretry": { const list = rdChat[rdId] || [], m = list[+v]; if (m) { list.splice(+v, 1); rdAsk(m.q); } break; }
       case "read": a.read = !a.read; keep.add(a.id); send("read", { id, v: a.read }); refreshCard(a); if (tldrId) renderTldr(); break;
       case "listengroup": { send("usage-listen", { kind: "group" }); const items = (groupIdx[v] || []).map(postItem); if (items.length) speak(label(+v)[0], items, undefined, "summaries"); break; }
       case "listenstory": send("usage-listen", { kind: "story" }); if (S.story) speak("Story", storyItems(S.story), undefined, "story"); break;
@@ -2266,6 +2497,7 @@ function clientApp() {
         a.pinned = a.pinned ? 0 : Date.now(); send("pin", { id, v: !!a.pinned });
         toast(a.pinned ? "Saved to Read later" : "Removed from Read later");
         if (view === "later") render(); else refreshCard(a);
+        if (rdId === id) renderReaderTools();
         break;
       }
       case "pindone": a.pinned = 0; a.read = true; send("pin", { id, v: false, done: true }); toast("Done — removed from Read later"); render(); break;
@@ -2639,6 +2871,49 @@ body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 112px)}
 .rs-done{opacity:.45}
 .rs-now{background:var(--signal-wash);color:var(--ink);box-shadow:0 0 0 2px var(--signal-wash),inset 0 -2px 0 var(--signal)}
 #readsheet{z-index:25}
+#reader{z-index:11}
+.rd-head{gap:12px}
+.rd-src{font-weight:700;color:var(--ink-2);font-size:calc(14px * var(--ts));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.rd-body{max-width:680px;margin:0 auto;padding:18px 20px 160px}
+.rd-title{font:800 calc(26px * var(--ts))/1.25 var(--display);margin:4px 0 8px;letter-spacing:-.01em}
+.rd-meta{color:var(--muted);font-size:calc(13.5px * var(--ts));margin:0 0 14px}
+.rd-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 18px;padding-bottom:16px;border-bottom:1px solid var(--rule)}
+.rd-tools .lsbtn.on{background:var(--amber-wash);color:var(--amber);border-color:var(--amber)}
+.rd-pin{margin-left:auto}
+.rd-pin .pinbtn{width:40px;height:34px;margin:0}
+.rd-img{display:block;width:100%;max-height:300px;object-fit:cover;border-radius:12px;margin:0 0 18px;background:var(--sheet)}
+.rd-p,.rd-ul li,.rd-q{font-size:calc(18px * var(--ts));line-height:1.7;color:var(--ink)}
+html[data-font=serif] .rd-p,html[data-font=serif] .rd-ul li,html[data-font=serif] .rd-q{font-family:var(--serif)}
+.rd-p{margin:0 0 16px}
+.rd-h{font:700 calc(21px * var(--ts))/1.3 var(--display);margin:26px 0 10px}
+.rd-ul{margin:0 0 16px;padding-left:22px}
+.rd-ul li{margin:0 0 6px}
+.rd-q{margin:0 0 16px;padding:2px 0 2px 16px;border-left:3px solid var(--rule);color:var(--ink-2);font-style:italic}
+.rd-pre{font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:12px;margin:0 0 16px;overflow-x:auto;white-space:pre;color:var(--ink-2)}
+.rd-wait{display:flex;align-items:center;gap:8px}
+.rd-skel i{display:block;height:14px;margin:14px 0;border-radius:7px;background:var(--rule);opacity:.55}
+.rd-skel i:nth-child(3n){width:72%}
+.rd-blocked{background:var(--amber-wash);border:1px solid var(--amber);border-radius:14px;padding:16px;margin:0 0 20px}
+.rd-blocked b{display:block;font-size:calc(17px * var(--ts));margin-bottom:4px}
+.rd-blocked p{margin:0 0 12px;color:var(--ink-2)}
+.rd-chat{margin-top:30px;padding-top:20px;border-top:1px solid var(--rule)}
+.rd-chat-h{font:700 calc(18px * var(--ts))/1.3 var(--display);margin:0 0 12px}
+.rd-msgs{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.rd-qb{align-self:flex-end;max-width:85%;background:var(--signal);color:var(--paper);padding:9px 13px;border-radius:16px 16px 4px 16px;font-size:calc(15px * var(--ts));white-space:pre-wrap}
+.rd-ab{align-self:flex-start;max-width:100%;background:var(--sheet);border:1px solid var(--rule);padding:10px 14px;border-radius:16px 16px 16px 4px;font-size:calc(15.5px * var(--ts));line-height:1.55}
+.rd-ab p{margin:0 0 8px}.rd-ab p:last-child{margin:0}
+.rd-ab ul{margin:0 0 8px;padding-left:20px}
+.rd-ab .ai-lbl{display:block;font-size:calc(12px * var(--ts));font-weight:700;color:var(--signal);margin-bottom:4px}
+.rd-ab.wait{display:flex;align-items:center;gap:8px;color:var(--muted)}
+.rd-ab.err{color:var(--danger)}
+.rd-sugg{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.rd-sugg .chip{padding:7px 12px;border-radius:16px;border:1.5px solid var(--rule);background:var(--sheet);color:var(--ink-2);font-size:calc(14px * var(--ts));font-weight:600}
+.rd-ask{display:flex;align-items:flex-end;gap:8px;background:var(--sheet);border:1.5px solid var(--rule);border-radius:22px;padding:5px 5px 5px 14px}
+.rd-ask textarea{flex:1;border:0;background:transparent;color:var(--ink);font:16px/1.4 var(--sans);resize:none;padding:7px 0;min-height:22px;max-height:120px;outline:none}
+.rd-send{width:36px;height:36px;border-radius:18px;display:grid;place-items:center;flex:none;background:var(--signal);color:var(--paper)}
+.rd-send svg{width:20px;height:20px}
+.rd-nokey{margin-top:30px}
+.rd-foot{margin-top:26px;text-align:center;font-size:calc(14px * var(--ts))}
 .ra-top{display:flex;flex-direction:column;gap:4px;min-width:0}
 .ra-top small{color:var(--muted);font-size:calc(13px * var(--ts));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ra-body{max-width:680px;margin:0 auto;padding:16px 20px 150px}
@@ -2957,6 +3232,7 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
 </div>
 <div id="tldr" class="sheet" aria-label="TL;DR"></div>
 <div id="aisheet" class="sheet" aria-label="AI settings"></div>
+<div id="reader" class="sheet" aria-label="Reader"></div>
 <div id="readsheet" class="sheet" aria-label="Text being read"></div>
 <div id="cfgsheet" class="sheet" aria-label="Settings"></div>
 <div id="player" hidden role="region" aria-label="Reading aloud">
