@@ -2,6 +2,21 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.16.0 (2026-11-01): A reader inside BlogPulse
+
+- 📖 **Read without leaving**: Posts open in a clean reader with the article's own text.
+- 🔊 **Listen as you read**: The text highlights sentence by sentence while it's read aloud.
+- ✦ **Ask about the article**: Ask AI questions about the post you're reading, with follow-ups.
+
+**Changes**
+
+- Tapping a post opens the reader: title, author, reading time, the article's paragraphs, subheadings, lists, quotes and code
+- If a site asks for consent or a sign-in, or can't be read, the reader says why and offers Open the article; the feed excerpt stays readable and listenable
+- Listen in the reader highlights its own text and follows the voice; code blocks are shown, not read
+- ✦ Ask about this article: suggested questions, answers from the article's text, follow-ups; counted as Article questions in AI usage
+- Settings › Reading › Open posts in the reader (on); off opens posts in Safari as before
+- The Article button on each post uses the same text as the reader
+
 ## 1.15.1 (2026-10-31): Room for the player
 
 - 📏 **Nothing hidden behind the player**: The last post in the list scrolls clear of the player while you listen.

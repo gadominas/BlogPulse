@@ -4,6 +4,37 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.16.0",
+      "date": "2026-11-01",
+      "title": "A reader inside BlogPulse",
+      "highlights": [
+        {
+          "icon": "📖",
+          "title": "Read without leaving",
+          "text": "Posts open in a clean reader with the article's own text."
+        },
+        {
+          "icon": "🔊",
+          "title": "Listen as you read",
+          "text": "The text highlights sentence by sentence while it's read aloud."
+        },
+        {
+          "icon": "✦",
+          "title": "Ask about the article",
+          "text": "Ask AI questions about the post you're reading, with follow-ups."
+        }
+      ],
+      "changes": [
+        "Tapping a post opens the reader: title, author, reading time, the article's paragraphs, subheadings, lists, quotes and code",
+        "If a site asks for consent or a sign-in, or can't be read, the reader says why and offers Open the article; the feed excerpt stays readable and listenable",
+        "Listen in the reader highlights its own text and follows the voice; code blocks are shown, not read",
+        "✦ Ask about this article: suggested questions, answers from the article's text, follow-ups; counted as Article questions in AI usage",
+        "Settings › Reading › Open posts in the reader (on); off opens posts in Safari as before",
+        "The Article button on each post uses the same text as the reader"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.15.1",
       "date": "2026-10-31",
       "title": "Room for the player",
