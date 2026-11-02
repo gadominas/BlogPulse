@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.16.1';
+const VERSION = '1.17.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -48,7 +48,7 @@ const BLUEPRINTS = [
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.6.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.8.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.12.0' },
-  { id: 'read-aloud', name: 'Read aloud', version: '1.1.0', since: '1.16.1' },
+  { id: 'read-aloud', name: 'Read aloud', version: '1.1.1', since: '1.17.0' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.14.0' },
 ];
 
@@ -886,13 +886,15 @@ async function makeTldr(a) {
 }
 
 // ---------- invite someone to read a post ----------
+function inviteTemplate(a, who) {   // the plain invitation, without AI
+  const src = (sources.find(s => s.id === a.src) || {}).title || hostOf(a.link);
+  const t = a.tldr || {}, lead = t.lead || a.ai || a.desc || "";
+  return { kind: "template", text: `${who ? "Hi " + who + ", t" : "T"}hought you'd find this worth a read: “${a.title}” from ${src}.${lead ? " " + lead : ""}\n\n${a.link}` };
+}
 async function makeInvite(a, who, instr) {
   const src = (sources.find(s => s.id === a.src) || {}).title || hostOf(a.link);
   const t = a.tldr || {};
-  if (!aiKey()) {
-    const lead = t.lead || a.ai || a.desc || "";
-    return { kind: "template", text: `${who ? "Hi " + who + ", t" : "T"}hought you'd find this worth a read: “${a.title}” from ${src}.${lead ? " " + lead : ""}\n\n${a.link}` };
-  }
+  if (!aiKey()) return inviteTemplate(a, who);
   const system = `You write short personal messages that invite someone to read an article. Write in the first person as the sender. Make the reader want to open it: lead with the most interesting point and say briefly why it matters to them. Be specific, not salesy. No hashtags, emojis or subject line unless the instructions ask for them. Do not include the link; it is added after your message. The sender's instructions on tone, language, length, format and audience override these defaults. Reply with only the message text.`;
   const user = `Sender's instructions: ${instr || "(none) — 2–3 friendly, specific sentences."}
 Recipient: ${who || "not specified"}
@@ -1150,6 +1152,16 @@ async function handle(m) {
       saveAll(); return call("onInvite", a.id, res);
     }
     case "share": if (m.text) await ShareSheet.present([m.text]); return;
+    case "quickinvite": {   // one tap: write the invitation with the last instructions, then straight to the share sheet
+      if (!a) return;
+      let res, fallback = false;
+      try { res = await makeInvite(a, "", settings.inviteInstr || ""); }
+      catch (e) { res = inviteTemplate(a, ""); fallback = true; }   // the AI failed: share the plain invitation instead of nothing
+      track("invite_made");
+      call("onQuickInvite", a.id, { kind: res.kind, fallback });
+      await ShareSheet.present([res.text]);
+      return;
+    }
     case "copy": if (m.text) { Pasteboard.copy(m.text); toast("Invite copied"); } return;
     case "tldr": {
       if (!a) return;
@@ -1451,7 +1463,8 @@ function clientApp() {
       ${!d.why && d.sections && d.sections.length ? `<p class="tli-why"><b>Covers:</b> ${d.sections.map(esc).join(" / ")}</p>` : ""}
       <div class="tli-act">
         <button class="sm" data-act="listentldr" data-id="${a.id}">${SPK}Listen to TL;DR</button>
-        <button class="sm" data-act="tldrpanel" data-id="${a.id}">${S.settings.hasKey ? "✦ " : ""}Invite to read</button>
+        <button class="sm invbtn ${quickInv.has(a.id) ? "busy" : ""}" data-act="quickinvite" data-id="${a.id}" aria-label="Invite someone to read this">${SHARE_ICO}${S.settings.hasKey ? "✦ " : ""}Invite to read</button>
+        <button class="link small" data-act="tldrpanel" data-id="${a.id}">Write it my way</button>
         ${d.kind !== "ai" && S.settings.hasKey ? `<button class="sm" data-act="tldrretry" data-id="${a.id}">✦ Summarise with AI</button>` : ""}
         <button class="hide" data-act="tldr" data-id="${a.id}">Hide</button>
       </div>
@@ -1621,6 +1634,22 @@ function clientApp() {
   };
   window.onDiscover = res => { results = res; searching = false; renderSheet(); };
   window.addDone = (feed, ok) => { adding.delete(feed); if (ok) added.add(feed); renderSheet(); };
+  // One-tap invitation: the button spins while the message is written, then the share sheet opens
+  const SHARE_ICO = `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7.5 7.5L12 3l4.5 4.5M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="fill:none;stroke:currentColor"/></svg>`;
+  const quickInv = new Set();
+  const invBtn = (a, mini) => `<button class="lsbtn invbtn ${mini ? "mini" : ""} ${quickInv.has(a.id) ? "busy" : ""}" data-act="quickinvite" data-id="${a.id}" aria-label="Invite someone to read this">${SHARE_ICO}${mini ? "" : "Invite"}</button>`;
+  function quickInvite(a) {
+    if (!a || quickInv.has(a.id)) return;
+    quickInv.add(a.id);
+    document.querySelectorAll(`[data-act="quickinvite"][data-id="${a.id}"]`).forEach(b => b.classList.add("busy"));
+    if (S.settings.hasKey) toast("✦ Writing the invite…");
+    send("quickinvite", { id: a.id });
+  }
+  window.onQuickInvite = (id, r) => {
+    quickInv.delete(id);
+    document.querySelectorAll(`[data-act="quickinvite"][data-id="${id}"]`).forEach(b => b.classList.remove("busy"));
+    if (r.fallback) toast("The AI couldn't write it, so this is the plain invitation");
+  };
   window.onInvite = (id, r) => {
     inv.busy = false;
     if (r.error) toast("Invite not written: " + r.error); else inv.out[id] = r;
@@ -1948,7 +1977,7 @@ function clientApp() {
     el.classList.toggle("open", !!rdId); lockBody();
     if (!rdId) return;
     const a = byId(rdId); if (!a) { rdId = ""; el.classList.remove("open"); return lockBody(); }
-    el.innerHTML = `<div class="sh-head rd-head"><span class="rd-src">${esc(srcTitle(a))}</span><button class="link" data-act="rdclose">Done</button></div>
+    el.innerHTML = `<div class="sh-head rd-head"><span class="rd-src">${esc(srcTitle(a))}</span><span class="rd-hbtns"><button class="link" data-act="rdorig" aria-label="Open the original article">Original ↗</button><button class="link" data-act="rdclose">Done</button></span></div>
       <article class="rd-body">
         <h1 class="rd-title">${esc(a.title)}</h1>
         <p class="rd-meta" id="rdMeta"></p>
@@ -1967,7 +1996,7 @@ function clientApp() {
     const a = byId(rdId), el = $("#rdTools"); if (!a || !el) return;
     el.innerHTML = `<button class="lsbtn ${rdReading() ? "on" : ""}" data-act="rdlisten">${rdReading() ? `${STOP_SM}Stop listening` : `${SPK}Listen`}</button>
       ${S.settings.hasKey ? `<button class="lsbtn" data-act="rdask">✦ Ask AI</button>` : ""}
-      <button class="lsbtn" data-act="rdorig" aria-label="Open the original article">Original ↗</button>
+      ${invBtn(a)}
       <span class="rd-pin">${pinBtn(a)}</span>`;
   }
   function renderReaderText() {
@@ -2168,7 +2197,7 @@ function clientApp() {
         : `<button class="tick" data-act="read" data-id="${a.id}" aria-label="${a.read ? "Mark unread" : "Mark read"}"></button>`}
       <div class="tmain" data-act="open" data-id="${a.id}"><h3>${a.pick ? `<span class="pk" aria-label="Pick for you">✦</span>` : ""}${esc(a.title)}</h3>
         <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span>${pinBtn(a)}</div></div>
-      <button class="lsbtn mini" data-act="listenarticle" data-id="${a.id}" aria-label="Listen to the full article">${SPK}</button>${tlBtn(a, true)}
+      <button class="lsbtn mini" data-act="listenarticle" data-id="${a.id}" aria-label="Listen to the full article">${SPK}</button>${tlBtn(a, true)}${invBtn(a, true)}
       <div class="stars mini ${a.rating ? "rated" : ""}">${stars}</div>${inlineTldr(a)}</article>`;
     return `<article class="${cls}" id="c-${a.id}">
       <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span>${pinBtn(a)}</div>
@@ -2178,7 +2207,7 @@ function clientApp() {
       <div class="row">
         <div class="stars ${a.rating ? "rated" : ""}">${stars}</div>
         ${a.isNew && !a.read ? `<span class="flag new">New</span>` : ""}${a.pick ? `<span class="flag pick">✦ Pick</span>` : ""}
-        <span class="acts"><button class="lsbtn" data-act="listenarticle" data-id="${a.id}" aria-label="Listen to the full article">${SPK}Article</button>${tlBtn(a)}${view === "later" ? `<button class="readbtn done" data-act="pindone" data-id="${a.id}">Done</button>` : `<button class="readbtn" data-act="read" data-id="${a.id}">${a.read ? "Mark unread" : "Mark read"}</button>`}</span>
+        <span class="acts"><button class="lsbtn" data-act="listenarticle" data-id="${a.id}" aria-label="Listen to the full article">${SPK}Article</button>${tlBtn(a)}${invBtn(a)}${view === "later" ? `<button class="readbtn done" data-act="pindone" data-id="${a.id}">Done</button>` : `<button class="readbtn" data-act="read" data-id="${a.id}">${a.read ? "Mark unread" : "Mark read"}</button>`}</span>
       </div>
     </article>`;
   }
@@ -2412,6 +2441,7 @@ function clientApp() {
         if (S.settings.readOnOpen && !a.read) { a.read = true; keep.add(a.id); setTimeout(() => view === "story" ? render() : refreshCard(a), 300); }
         if (S.settings.openInReader === false) send("open", { id }); else openReader(id);
         break;
+      case "quickinvite": quickInvite(a); break;
       case "rdclose": rdId = ""; renderReader(); break;
       case "rdorig": send("open", { id: rdId, orig: true }); break;
       case "rdlisten": readerListen(); break;
@@ -2883,6 +2913,7 @@ body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 112px)}
 .rd-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 18px;padding-bottom:16px;border-bottom:1px solid var(--rule)}
 .rd-tools .lsbtn.on{background:var(--amber-wash);color:var(--amber);border-color:var(--amber)}
 .rd-pin{margin-left:auto}
+.rd-hbtns{display:flex;gap:18px;flex:none}
 .rd-pin .pinbtn{width:40px;height:34px;margin:0}
 .rd-img{display:block;width:100%;max-height:300px;object-fit:cover;border-radius:12px;margin:0 0 18px;background:var(--sheet)}
 .rd-p,.rd-ul li,.rd-q{font-size:calc(18px * var(--ts));line-height:1.7;color:var(--ink)}
@@ -2931,6 +2962,8 @@ html[data-font=serif] .ra-p{font-family:var(--serif)}
 .pl-mode.m-story{background:#F5C04A;color:#0E1116}
 .pl-mode.m-summaries{background:#7AB4FF;color:#0E1116}
 .sh-head .pl-mode{font-size:11.5px}
+.invbtn.busy{pointer-events:none;opacity:.7}
+.invbtn.busy .ico{animation:spin .8s linear infinite;transform-origin:50% 50%}
 .lsbtn{display:inline-flex;align-items:center;flex:none;min-height:32px;padding:4px 10px 4px 8px;border-radius:16px;background:var(--sheet);color:var(--ink-2);border:1.5px solid var(--rule);font-weight:700;font-size:calc(13px * var(--ts));white-space:nowrap}
 .lsbtn .ico{width:15px;height:15px;margin-right:4px}
 .lsbtn.mini{min-height:28px;padding:2px 7px}
