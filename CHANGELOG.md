@@ -2,6 +2,23 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.18.0 (2026-11-02): Invite, your way
+
+- 👤 **Who it's for**: Invite asks who you're sending to before it writes anything.
+- ✍️ **Your instructions**: Write how it should sound, tap a preset, or reuse your last instructions.
+- 📤 **Then straight to sharing**: Write and share opens the share sheet with the message and link.
+
+**Changes**
+
+- Invite opens a dialog: who it's for, your instructions (with AI), presets and Use my last instructions; it starts empty for each post
+- Write and share writes the invitation for that person and opens the share sheet; Cancel or a tap outside closes it
+- Without an AI key the dialog asks who it's for and shares the plain invitation
+- An open TL;DR has Full screen for the TL;DR on its own screen
+
+**Fixes**
+
+- The no-key note in the invite composer pointed to Blogs instead of Settings › AI settings
+
 ## 1.17.0 (2026-11-02): Invite in one tap
 
 - 📤 **Invite in one tap**: An Invite button next to Article and TL;DR goes straight to sharing.
