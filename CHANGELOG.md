@@ -2,6 +2,20 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.17.0 (2026-11-02): Invite in one tap
+
+- 📤 **Invite in one tap**: An Invite button next to Article and TL;DR goes straight to sharing.
+- ✦ **Written for you**: With AI, the invitation follows your last instructions; without it, a plain one.
+- 📖 **In the reader too**: Invite sits with Listen and Ask AI; Original moved up next to Done.
+
+**Changes**
+
+- Invite button on every post, next to Article and TL;DR (icon only in the Tiny layout), in the reader's tool row and in an open TL;DR
+- One tap writes the invitation (AI with your last instructions, or the plain one without a key) and opens the share sheet with the message and link
+- If the AI fails, the plain invitation is shared instead, with a note
+- Write it my way in a TL;DR opens the full composer
+- The reader's Original button moved to the top, next to Done
+
 ## 1.16.1 (2026-11-01): Easier questions
 
 - ⌨️ **Send from the keyboard**: In the reader, the keyboard's Send key asks your question.

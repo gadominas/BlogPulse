@@ -4,6 +4,36 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.17.0",
+      "date": "2026-11-02",
+      "title": "Invite in one tap",
+      "highlights": [
+        {
+          "icon": "📤",
+          "title": "Invite in one tap",
+          "text": "An Invite button next to Article and TL;DR goes straight to sharing."
+        },
+        {
+          "icon": "✦",
+          "title": "Written for you",
+          "text": "With AI, the invitation follows your last instructions; without it, a plain one."
+        },
+        {
+          "icon": "📖",
+          "title": "In the reader too",
+          "text": "Invite sits with Listen and Ask AI; Original moved up next to Done."
+        }
+      ],
+      "changes": [
+        "Invite button on every post, next to Article and TL;DR (icon only in the Tiny layout), in the reader's tool row and in an open TL;DR",
+        "One tap writes the invitation (AI with your last instructions, or the plain one without a key) and opens the share sheet with the message and link",
+        "If the AI fails, the plain invitation is shared instead, with a note",
+        "Write it my way in a TL;DR opens the full composer",
+        "The reader's Original button moved to the top, next to Done"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.16.1",
       "date": "2026-11-01",
       "title": "Easier questions",
