@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.17.0';
+const VERSION = '1.18.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -1152,11 +1152,13 @@ async function handle(m) {
       saveAll(); return call("onInvite", a.id, res);
     }
     case "share": if (m.text) await ShareSheet.present([m.text]); return;
-    case "quickinvite": {   // one tap: write the invitation with the last instructions, then straight to the share sheet
+    case "quickinvite": {   // from the Invite dialog: write the invitation for that person, then straight to the share sheet
       if (!a) return;
+      const who = String(m.who || "").trim().slice(0, 120), instr = String(m.instr || "").trim().slice(0, 1000);
+      if (instr) { settings.inviteInstr = instr; saveAll(); }
       let res, fallback = false;
-      try { res = await makeInvite(a, "", settings.inviteInstr || ""); }
-      catch (e) { res = inviteTemplate(a, ""); fallback = true; }   // the AI failed: share the plain invitation instead of nothing
+      try { res = await makeInvite(a, who, instr); }
+      catch (e) { res = inviteTemplate(a, who); fallback = true; }   // the AI failed: share the plain invitation instead of nothing
       track("invite_made");
       call("onQuickInvite", a.id, { kind: res.kind, fallback });
       await ShareSheet.present([res.text]);
@@ -1464,8 +1466,8 @@ function clientApp() {
       <div class="tli-act">
         <button class="sm" data-act="listentldr" data-id="${a.id}">${SPK}Listen to TL;DR</button>
         <button class="sm invbtn ${quickInv.has(a.id) ? "busy" : ""}" data-act="quickinvite" data-id="${a.id}" aria-label="Invite someone to read this">${SHARE_ICO}${S.settings.hasKey ? "✦ " : ""}Invite to read</button>
-        <button class="link small" data-act="tldrpanel" data-id="${a.id}">Write it my way</button>
         ${d.kind !== "ai" && S.settings.hasKey ? `<button class="sm" data-act="tldrretry" data-id="${a.id}">✦ Summarise with AI</button>` : ""}
+        <button class="link small" data-act="tldrfull" data-id="${a.id}">Full screen</button>
         <button class="hide" data-act="tldr" data-id="${a.id}">Hide</button>
       </div>
     </div>`;
@@ -1527,8 +1529,8 @@ function clientApp() {
     var tries = 0;
     (function wait() {
       // Never over the launch screen, another sheet, or a task the app says can't be interrupted.
-      // BlogPulse adds its own overlay: #confirm ("Mark all read?").
-      var busy = document.querySelector("#splash:not(.gone)") || document.getElementById("upd") || document.getElementById("aiinv") || document.getElementById("confirm") ||
+      // BlogPulse adds its own overlays: #confirm ("Mark all read?") and #invdlg (Invite to read).
+      var busy = document.querySelector("#splash:not(.gone)") || document.getElementById("upd") || document.getElementById("aiinv") || document.getElementById("confirm") || document.getElementById("invdlg") ||
         document.querySelector(".sheet.open, #cfgsheet.open, #aisheet.open") || (window.canInvite && !window.canInvite());
       if (busy) { if (++tries < 40) setTimeout(wait, 500); return; }   // gives up after 20 s; it comes back another day
       setTimeout(function () { if (!document.getElementById("aiinv")) showInvite(c); }, 600);
@@ -1638,12 +1640,35 @@ function clientApp() {
   const SHARE_ICO = `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7.5 7.5L12 3l4.5 4.5M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="fill:none;stroke:currentColor"/></svg>`;
   const quickInv = new Set();
   const invBtn = (a, mini) => `<button class="lsbtn invbtn ${mini ? "mini" : ""} ${quickInv.has(a.id) ? "busy" : ""}" data-act="quickinvite" data-id="${a.id}" aria-label="Invite someone to read this">${SHARE_ICO}${mini ? "" : "Invite"}</button>`;
-  function quickInvite(a) {
+  function quickInvite(a, who, instr) {
     if (!a || quickInv.has(a.id)) return;
     quickInv.add(a.id);
+    if (instr) S.settings.inviteInstr = instr;
     document.querySelectorAll(`[data-act="quickinvite"][data-id="${a.id}"]`).forEach(b => b.classList.add("busy"));
     if (S.settings.hasKey) toast("✦ Writing the invite…");
-    send("quickinvite", { id: a.id });
+    send("quickinvite", { id: a.id, who, instr });
+  }
+  // Invite asks first: who it's for and how to write it (empty for every post; ↺ brings back the last instructions)
+  let qiId = "";
+  function openInviteDialog(a) {
+    if (!a || quickInv.has(a.id) || document.getElementById("invdlg")) return;
+    qiId = a.id;
+    const ai = S.settings.hasKey;
+    const ov = document.createElement("div"); ov.id = "invdlg";
+    ov.innerHTML = `<div class="updp" role="dialog" aria-labelledby="qit">
+      <div class="updtag">${ai ? "✦ " : ""}Invite to read</div>
+      <h2 class="updt qi-t" id="qit">${esc(a.title)}</h2>
+      <div class="upds">${esc(srcTitle(a))}</div>
+      <div class="inv qi-f">
+        <label class="inv-l">Who it's for<input id="qiWho" placeholder="Optional — e.g. my team, a colleague" autocapitalize="off"></label>
+        ${ai ? `<label class="inv-l">Your instructions<textarea id="qiInstr" rows="3" placeholder="e.g. Casual, two sentences, say how it relates to our platform work"></textarea></label>
+        <div class="inv-presets">${S.settings.inviteInstr ? `<button class="chip last" data-act="qilast">↺ Use my last instructions</button>` : ""}${presets().map(p => `<button class="chip" data-act="qipreset" data-v="${esc(p)}">+ ${esc(p)}</button>`).join("")}</div>`
+        : `<p class="note">Without an AI key this shares a simple invitation. Add a key in <b>Settings › AI settings</b> to have it written from your instructions.</p>`}
+      </div>
+      <button class="primary updgo" data-act="qigo">${ai ? "✦ Write and share" : "Share"}</button>
+      <button class="updlater" data-act="qicancel">Cancel</button></div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });   // outside = Cancel
   }
   window.onQuickInvite = (id, r) => {
     quickInv.delete(id);
@@ -2381,7 +2406,7 @@ function clientApp() {
       ${ai ? `<label class="inv-l">Your instructions<textarea id="invInstr" rows="3" placeholder="e.g. Casual, two sentences, say how it relates to our platform work">${esc(inv.instr)}</textarea></label>
       <div class="inv-presets">${S.settings.inviteInstr && !inv.instr.trim() ? `<button class="chip last" data-act="invlast">↺ Use my last instructions</button>` : ""}${presets().map(p => `<button class="chip" data-act="invpreset" data-v="${esc(p)}">+ ${esc(p)}</button>`).join("")}</div>
 `
-      : `<p class="note">Without an AI key this uses a simple template. Add a Claude or OpenAI key under Blogs to write invites from your own instructions.</p>`}
+      : `<p class="note">Without an AI key this uses a simple template. Add a key in <b>Settings › AI settings</b> to write invites from your own instructions.</p>`}
       <button class="primary block" data-act="invgo" data-id="${a.id}" ${inv.busy ? "disabled" : ""}>${inv.busy ? "Writing…" : (out ? "Write again" : (ai ? "✦ Write invite" : "Write invite"))}</button>
       ${out ? `<div class="inv-out">
         ${out.kind === "ai" ? `<span class="badge-ai">✦ AI-written by ${out.provider === "openai" ? "OpenAI" : "Claude"}</span>` : `<span class="badge-ex">Template — no AI</span>`}
@@ -2441,7 +2466,16 @@ function clientApp() {
         if (S.settings.readOnOpen && !a.read) { a.read = true; keep.add(a.id); setTimeout(() => view === "story" ? render() : refreshCard(a), 300); }
         if (S.settings.openInReader === false) send("open", { id }); else openReader(id);
         break;
-      case "quickinvite": quickInvite(a); break;
+      case "quickinvite": openInviteDialog(a); break;
+      case "qipreset": { const ta = $("#qiInstr"); if (ta) { const cur = ta.value.trim(); ta.value = (cur ? cur.replace(/[.;,]?$/, ". ") : "") + v + "."; } break; }
+      case "qilast": { const ta = $("#qiInstr"); if (ta) ta.value = S.settings.inviteInstr || ""; t.remove(); break; }
+      case "qicancel": { const d = $("#invdlg"); if (d) d.remove(); break; }
+      case "qigo": {
+        const who = (($("#qiWho") || {}).value || "").trim(), instr = (($("#qiInstr") || {}).value || "").trim();
+        const d = $("#invdlg"); if (d) d.remove();
+        quickInvite(byId(qiId), who, instr);
+        break;
+      }
       case "rdclose": rdId = ""; renderReader(); break;
       case "rdorig": send("open", { id: rdId, orig: true }); break;
       case "rdlisten": readerListen(); break;
@@ -2473,6 +2507,7 @@ function clientApp() {
         else { expanded.add(id); if (!tl[id] || tl[id].error) { tl[id] = "loading"; send("tldr", { id }); } }
         refreshInline(id); break;
       case "tldrpanel": openTldr(id, false); inv.open = true; renderTldr(); break;
+      case "tldrfull": openTldr(id, false); inv.open = false; renderTldr(); break;   // the TL;DR on its own screen
       case "invtoggle": inv.open = !inv.open; renderTldr(); break;
       case "invpreset": {
         inv.instr = (inv.instr.trim() ? inv.instr.trim().replace(/[.;,]?$/, ". ") : "") + v + ".";
@@ -3057,6 +3092,9 @@ html[data-font=serif] .ra-p{font-family:var(--serif)}
 .inv .primary.block{margin-top:12px}
 .inv .primary[disabled]{opacity:.6}
 .inv-out{margin-top:14px}
+#invdlg .qi-f{margin:4px 0 6px;padding:0;border:0;background:none}
+#invdlg .qi-t{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+#invdlg .updp{max-height:88vh;overflow-y:auto}
 .inv-out textarea{margin-top:8px}
 .inv-actions{display:flex;gap:8px;margin-top:10px}
 .inv-actions .primary{flex:1;text-align:center}
@@ -3075,7 +3113,7 @@ html[data-font=serif] .ra-p{font-family:var(--serif)}
 .catsel{margin-top:6px;max-width:100%;font:calc(13px * var(--ts)) var(--sans);color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:8px;padding:5px 8px}
 .chip.last{border-color:var(--signal);color:var(--signal)}
 #cfgsheet{z-index:13}
-#upd,#confirm{position:fixed;inset:0;z-index:48;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
+#upd,#confirm,#invdlg{position:fixed;inset:0;z-index:48;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
 .updtag.warn{background:var(--danger);color:#fff}
 .danger-fill{background:var(--danger);color:#fff}
 .listbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px 0;color:var(--ink-2);font-size:calc(13.5px * var(--ts))}
