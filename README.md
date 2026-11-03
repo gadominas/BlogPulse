@@ -97,7 +97,7 @@ What else you need:
 | See only one topic | Tap a topic at the top, or swipe left or right on the list |
 | Read the gist | Tap **TL;DR** on the post |
 | Read the whole article | Tap the title |
-| Read a post | Tap it: it opens in BlogPulse's reader with the post's own text, **Listen** (the text highlights as it's read) and **✦ Ask AI** for questions about it. If the site needs consent or a sign-in, the reader says so and offers **Open the article**. Prefer Safari? Turn off **Settings › Reading › Open posts in the reader** |
+| Read a post | Tap it: it opens in BlogPulse's reader with the post's own text, **Listen** (the text highlights as it's read) and **✦ Ask AI** for questions about it. BlogPulse answers the cookie-consent pages that Yahoo and Google show in Europe, follows Google News links to the publisher, and when a page still won't open from your phone, reads it through Jina Reader. If none of that works (a sign-in, say), the reader says why, offers **Open the article** and **Try again**, and lists **What BlogPulse tried**. **Original ↗** opens the publisher's page. Prefer Safari? Turn off **Settings › Reading › Open posts in the reader** |
 | Send a post to someone | Tap **Invite** next to **Article** and **TL;DR** (also in the reader and in a TL;DR). Say who it's for and, with an AI key, how to write it (or tap a preset, or **↺ Use my last instructions**), then **✦ Write and share**: the share sheet opens with the message and the link |
 | Save a post for later | Tap the bookmark on the post. It waits in the **Read later** tab; tap **Done** when you've read it, or **Clear finished** to remove every read one |
 | Mark as read | Tap **Mark read**, **Mark N read** next to a day to clear that day, or **Mark all read** at the top of the list to clear the page you're on, after a warning |
@@ -215,6 +215,7 @@ BlogPulse checks this repository for a new version each time it opens. When one 
 
 - **Everything runs on your phone.** There is no BlogPulse server, and nothing is collected unless you agree to the anonymous usage counts below. Your reading data (blogs, posts, ratings, stories, token counts, settings) is stored as JSON in **iCloud Drive › Scriptable › BlogPulse**.
 - **What leaves the phone:** requests to the blogs you follow, Feedly's public feed search when you search by name, and your AI provider. The AI receives post titles and excerpts, and for a TL;DR the article text, only when a feature needs it and only from the provider you chose; the ✦ AI voice sends the text to be spoken to OpenAI.
+- **Jina Reader (on by default, Settings › Reading):** when a post won't open from your phone, only its public address is sent to [r.jina.ai](https://jina.ai/reader/), which returns the page's text. Turn it off to keep every request on your phone; an optional Jina key is stored in the iOS Keychain and sent only to Jina.
 - AI keys stay in the iOS Keychain and are only sent to their own provider.
 - The update check only downloads `releases.json` from this repository.
 

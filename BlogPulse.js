@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.18.0';
+const VERSION = '1.19.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -36,6 +36,23 @@ const KC_UPDATE_SNOOZE = 'blogpulse-update-snooze';
 // HOST must be the region the project lives in: PostHog's other region answers "accepted" and then drops the events.
 const USAGE = { HOST: 'https://us.i.posthog.com', KEY: 'phc_yAi2PxJCRioWEKLF3uockdCf3QvyQdNABivwqpE4NCWR' };   // the shared project
 const KC_INSTALL = 'blogpulse-install-id';
+// Other secrets (settings blueprint, Step 7): each its own Keychain entry, typed into a native secure prompt, never in settings.json or the page.
+const SECRETS = { jina: { key: "BLOGPULSE_JINA_KEY", name: "Jina Reader key", hint: "Free at jina.ai (API key). Only needed when Jina Reader answers 401, 402 or 403 without one." } };
+const secretFor = id => Keychain.contains(SECRETS[id].key) ? Keychain.get(SECRETS[id].key) : null;
+async function askSecret(id) {
+  const d = SECRETS[id], cur = secretFor(id);
+  const al = new Alert();
+  al.title = d.name;
+  al.message = (cur ? `The saved key ends in …${cur.slice(-4)}. Paste a new key to replace it. ` : "") + d.hint + " Stored in the iOS Keychain on this device only.";
+  al.addSecureTextField("Key", "");
+  al.addAction("Save key");
+  al.addCancelAction("Cancel");
+  if (await al.present() !== 0) return false;
+  const v = al.textFieldValue(0).trim();
+  if (!v) return false;
+  Keychain.set(d.key, v);
+  return true;
+}
 
 // ───────── Blueprints ─────────
 // Shared blueprints this app was built with (github.com/gadominas/app-blueprints). One line per blueprint, in this exact shape:
@@ -48,7 +65,7 @@ const BLUEPRINTS = [
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.6.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.8.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.12.0' },
-  { id: 'read-aloud', name: 'Read aloud', version: '1.1.1', since: '1.17.0' },
+  { id: 'read-aloud', name: 'Read aloud', version: '1.2.0', since: '1.19.0' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.14.0' },
 ];
 
@@ -383,7 +400,7 @@ async function loadData() {
   dataLoaded = loadIssues.length === 0;   // anything missing: show what we have, save nothing over it
 }
 const settings = Object.assign(
-  { groupBy: "day", view: "unread", readOnOpen: false, openInReader: true, ai: true, aiProvider: "anthropic", lastSession: 0, lastScan: 0,
+  { groupBy: "day", view: "unread", readOnOpen: false, openInReader: true, readerProxy: true, ai: true, aiProvider: "anthropic", lastSession: 0, lastScan: 0,
     checkUpdates: true,   // offer new versions from GitHub each time BlogPulse opens
     shareUsage: false, usageAsked: false,  // anonymous usage counts: off until the person agrees
     speechEngine: "device", ttsModel: "gpt-4o-mini-tts", ttsVoice: "coral", ttsInstructions: "",   // read aloud: iPhone voices or OpenAI
@@ -787,6 +804,180 @@ function extractArticle(html) {
 
 // ---------- Reader: the post's own text inside BlogPulse ----------
 // Paragraphs, subheadings, lists, quotes and code in page order; menus, footers and sharing bars are dropped.
+// ── Getting the page (app-blueprints · read-aloud 1.2.0, Step 9): snippets/read-aloud/page-fetch.scriptable.js, names kept ──
+const plain = s => decode(stripTags(String(s || "")));   // the text of a bit of HTML or markdown (page-fetch expects plain())
+// Scriptable's JavaScriptCore is not a browser: no URL, URLSearchParams, setTimeout or atob here.
+// 2. Plain helpers (no URL class in Scriptable)
+const absUrl = (href, base) => {   // a link on a page, made absolute
+  if (!href) return base;
+  if (/^https?:\/\//i.test(href)) return href;
+  const origin = (String(base).match(/^https?:\/\/[^/]+/i) || [""])[0];
+  if (href.startsWith("//")) return "https:" + href;
+  if (href.startsWith("/")) return origin + href;
+  return String(base).replace(/[?#].*$/, "").replace(/[^/]*$/, "") + href;
+};
+const unq = v => String(v || "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#x2F;/gi, "/").replace(/&#47;/g, "/");
+const hostOfUrl = u => (String(u).match(/^https?:\/\/([^/?#]+)/i) || [])[1] || String(u);
+function formFields(form) {   // a form's inputs as { name: value }, single or double quotes
+  const out = {};
+  for (const inp of form.match(/<input[^>]+>/gi) || []) {
+    const name = (inp.match(/name=["']([^"']+)["']/i) || [])[1], val = unq((inp.match(/value=["']([^"']*)["']/i) || [])[1] || "");
+    if (name) out[name] = val;
+  }
+  return out;
+}
+const enc = o => Object.entries(o).map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v)).join("&");
+function cookiesOf(resp, domainRx, jar) {
+  for (const c of (resp && resp.cookies) || []) if (c && c.name && domainRx.test(c.domain || "")) jar[c.name] = c.value;
+  return jar;
+}
+
+// 3. Consent walls in Europe. Answered once, the way a person would in Safari, and the cookies kept in settings,
+//    so later pages load directly. Yahoo: "Accept all" plus Yahoo's own copyConsent step. Google: its "Reject all" form.
+let consentRun = null, consentAt = 0;
+async function yahooConsent(html, pageUrl, log = []) {
+  const forms = html.match(/<form\b[\s\S]*?<\/form>/gi) || [];
+  const form = forms.find(f => /name=["']?agree/i.test(f)) || forms.find(f => /method=["']?post/i.test(f));
+  if (!form) { log.push(`Yahoo's consent page had no form to answer (${html.length} characters)`); return false; }
+  const action = absUrl(unq((form.match(/action=["']([^"']*)["']/i) || [])[1]), pageUrl);
+  const fields = formFields(form);
+  for (const k of Object.keys(fields)) if (/^(agree|reject)$/i.test(k)) delete fields[k];
+  const sessionId = fields.sessionId || (pageUrl.match(/[?&]sessionId=([^&#]+)/) || [])[1] || "";
+  if (!fields.consentUUID) fields.consentUUID = "default";
+  if (!fields.namespace) fields.namespace = "yahoo";
+  const jar = {}, r = new Request(action);
+  r.method = "POST"; r.timeoutInterval = cfg("fetchTimeout");
+  r.headers = { "User-Agent": cfg("userAgent"), "Content-Type": "application/x-www-form-urlencoded", "Referer": pageUrl };
+  r.body = enc(fields) + "&agree=agree&agree=agree";
+  await r.loadString();
+  cookiesOf(r.response, /yahoo/i, jar);
+  log.push(`Answered Yahoo's consent (HTTP ${r.response ? r.response.statusCode : "?"})`);
+  if (sessionId) {   // Yahoo's page does this next: copy the consent to its other sites, which sets the cookies articles need
+    const g = new Request(`https://guce.yahoo.com/copyConsent?sessionId=${encodeURIComponent(sessionId)}`);
+    g.timeoutInterval = cfg("fetchTimeout"); g.headers = { "User-Agent": cfg("userAgent"), "Referer": action };
+    try { await g.loadString(); cookiesOf(g.response, /yahoo/i, jar); } catch (e) { log.push("Yahoo's copyConsent failed: " + (e.message || e)); }
+  }
+  const names = Object.keys(jar);
+  log.push(names.length ? `Yahoo returned cookies: ${names.join(", ")}` : "Yahoo returned no cookies");
+  startLog(`Yahoo consent answered: ${names.length ? names.join(", ") : "no cookies returned"}`);
+  if (names.length) { settings.yahooCookie = names.map(k => k + "=" + jar[k]).join("; "); write("settings", settings); consentAt = Date.now(); }
+  return true;
+}
+const googleCookie = () => settings.googleCookie || "SOCS=CAI";
+async function googleConsent(html, pageUrl, log = []) {
+  const forms = (html.match(/<form\b[\s\S]*?<\/form>/gi) || []).filter(f => /consent\.google|\/save/i.test((f.match(/action=["']([^"']*)["']/i) || [])[1] || ""));
+  const form = forms.find(f => formFields(f).set_eom === "true") || forms[0];   // "Reject all"
+  if (!form) { log.push(`Google's consent page had no form to answer (${html.length} characters)`); return false; }
+  const r = new Request(absUrl(unq((form.match(/action=["']([^"']*)["']/i) || [])[1]), pageUrl));
+  r.method = "POST"; r.timeoutInterval = cfg("fetchTimeout");
+  r.headers = { "User-Agent": cfg("userAgent"), "Content-Type": "application/x-www-form-urlencoded", "Referer": pageUrl };
+  r.body = enc(formFields(form));
+  await r.loadString();
+  const jar = cookiesOf(r.response, /google/i, {}), names = Object.keys(jar);
+  log.push(`Answered Google's consent (HTTP ${r.response ? r.response.statusCode : "?"})${names.length ? ", cookies: " + names.join(", ") : ", no cookies returned"}`);
+  startLog(`Google consent answered: ${names.length ? names.join(", ") : "no cookies returned"}`);
+  if (names.length) { settings.googleCookie = names.map(k => k + "=" + jar[k]).join("; "); write("settings", settings); }
+  return true;
+}
+
+// 4. One page, with the cookies for its site, through any consent wall, logging each step.
+//    Google News links are followed to the publisher first (googleNewsURL); Google's own pages are never the article.
+async function getPage(u) {
+  const r = new Request(u), host = hostOfUrl(u);
+  r.timeoutInterval = cfg("fetchTimeout");
+  r.headers = { "User-Agent": cfg("userAgent"), "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5", "Accept-Language": "en-US,en;q=0.8" };
+  if (settings.yahooCookie && /(^|\.)yahoo\.com$/i.test(host)) r.headers.Cookie = settings.yahooCookie;
+  if (/(^|\.)google\.[a-z.]+$/i.test(host)) r.headers.Cookie = googleCookie();
+  const html = await r.loadString();
+  return { html: html || "", url: (r.response && r.response.url) || u, code: r.response ? r.response.statusCode : 0 };
+}
+async function fetchPage(url, log = []) {
+  if (/news\.google\./i.test(url)) {
+    const real = await googleNewsURL(url, log).catch(e => { log.push("Google News link not decoded: " + String(e.message || e).slice(0, 60)); return null; });
+    if (real) { log.push("Google News link leads to " + hostOfUrl(real)); url = real; } else log.push("Google News didn't say where the article is");
+  }
+  let r = await getPage(url);
+  log.push(`Opened ${hostOfUrl(r.url)}: HTTP ${r.code}, ${r.html.length} characters`);
+  if (/consent\.yahoo\.com|guce\.yahoo\.com/i.test(r.url)) {   // one answer at a time, shared by pages loading together
+    if (!consentRun && settings.yahooCookie && Date.now() - consentAt < 60e3) consentRun = Promise.resolve(true);
+    if (!consentRun) consentRun = yahooConsent(r.html, r.url, log).catch(e => { log.push("Yahoo consent failed: " + (e.message || e)); return false; }).then(ok => { consentRun = null; return ok; });
+    let ok = false;
+    try { ok = await consentRun; } catch (e) {}
+    if (ok) { r = await getPage(url); log.push(`Opened it again: ${hostOfUrl(r.url)}, HTTP ${r.code}, ${r.html.length} characters`); }
+  }
+  if (/consent\.google\./i.test(r.url) && await googleConsent(r.html, r.url, log).catch(() => false)) { r = await getPage(url); log.push(`Opened it again: ${hostOfUrl(r.url)}, HTTP ${r.code}`); }
+  if (/(consent|guce)\.[a-z.]*\//i.test(r.url)) log.push("Still a consent page");
+  if (r.code >= 400 || /(consent|guce)\.[a-z.]*\//i.test(r.url) || /news\.google\./i.test(r.url)) r.html = "";
+  return r;
+}
+
+// 5. Google News article links hide the publisher. Older ids carry it inside; newer ones are exchanged for it with the
+//    signature and timestamp on Google's article page (behind Google's consent wall in Europe).
+async function googleNewsURL(url, log = []) {
+  const id = (String(url).match(/\/articles\/([^?/#]+)/) || [])[1];
+  if (!id) return null;
+  try {
+    const b = id.replace(/-/g, "+").replace(/_/g, "/"), raw = Data.fromBase64String(b + "===".slice((b.length + 3) % 4)).toRawString() || "";
+    const m = raw.match(/https?:\/\/[^\s"'<>\x00-\x1f\x7f-\uffff]+/);
+    if (m && !/^AU_yq/.test(raw.slice(4))) return m[0];
+  } catch (e) {}
+  let p = await getPage(`https://news.google.com/rss/articles/${id}`);
+  if (/consent\.google\./i.test(p.url) && await googleConsent(p.html, p.url, log).catch(() => false)) p = await getPage(`https://news.google.com/rss/articles/${id}`);
+  const sg = (p.html.match(/data-n-a-sg="([^"]+)"/) || [])[1], ts = (p.html.match(/data-n-a-ts="([^"]+)"/) || [])[1];
+  if (!sg || !ts) { log.push(/consent\.google\./i.test(p.url) ? "Google still shows its consent page" : "Google's article page had no link signature"); return null; }
+  const inner = `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${id}",${ts},"${sg}"]`;
+  const r = new Request("https://news.google.com/_/DotsSplashUi/data/batchexecute");
+  r.method = "POST"; r.timeoutInterval = cfg("fetchTimeout");
+  r.headers = { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "User-Agent": cfg("userAgent"), "Cookie": googleCookie() };
+  r.body = "f.req=" + encodeURIComponent(JSON.stringify([[["Fbv4je", inner, null, "generic"]]]));
+  const txt = await r.loadString();
+  for (const line of String(txt).split("\n")) {
+    if (!line.startsWith("[")) continue;
+    try { for (const row of JSON.parse(line)) if (row[0] === "wrb.fr" && row[2]) { const res = JSON.parse(row[2]); if (res[0] === "garturlres" && /^https?:/.test(res[1])) return res[1]; } } catch (e) {}
+  }
+  return null;
+}
+
+// 6. Jina Reader (r.jina.ai): pages that still won't open from the phone (a consent wall that can't be answered,
+//    pages built by scripts, apps blocked) are opened on Jina's servers, which send back markdown. Only the page's
+//    public address is sent. Never for Google News links (Jina refuses them with HTTP 403).
+const proxyCache = {};
+async function proxyRead(url, log = []) {
+  if (settings.readerProxy === false) { log.push("Jina Reader is off (Settings › Reading)"); return null; }
+  if (!/^https?:\/\//i.test(url)) return null;
+  if (/news\.google\.|consent\.google\./i.test(url)) { log.push("Jina Reader can't follow Google News links"); return null; }
+  if (proxyCache[url] !== undefined) { log.push(proxyCache[url] ? `Jina Reader (earlier): ${proxyCache[url].words} words` : "Jina Reader couldn't read it earlier"); return proxyCache[url]; }
+  try {
+    const r = new Request("https://r.jina.ai/" + url);
+    r.timeoutInterval = Math.max(20, cfg("fetchTimeout"));
+    r.headers = { "Accept": "text/plain", "X-Return-Format": "markdown", "User-Agent": cfg("userAgent") };
+    const jk = secretFor("jina");
+    if (jk) r.headers.Authorization = "Bearer " + jk;
+    const txt = await r.loadString(), code = r.response ? r.response.statusCode : 0;
+    if (code >= 400 || !txt) {
+      let why = String(txt || "").replace(/\s+/g, " ").trim();
+      try { const j = JSON.parse(txt); why = j.readableMessage || j.message || j.detail || why; } catch (e) {}
+      throw new Error(`HTTP ${code}${why ? ": " + why.slice(0, 120) : ""}${[401, 402, 403].includes(code) && !jk ? " (a free Jina Reader key may help)" : ""}`);
+    }
+    const md = (txt.split(/\nMarkdown Content:\s*\n/)[1] || txt).trim();
+    const clean = t => plain(t.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`]{1,3}([^*_`]+)[*_`]{1,3}/g, "$1")).replace(/\s+/g, " ").trim();
+    const links = t => (t.match(/\]\(/g) || []).length, blocks = [];
+    for (const raw of md.split(/\n\s*\n/)) for (const line0 of raw.split(/\n(?=\s*(?:[-*+]|\d+\.)\s)/)) {
+      const line = line0.trim(), t = clean(line.replace(/^#{1,6}\s+|^>\s?|^[-*+]\s+|^\d+\.\s+/gm, ""));
+      if (!t || /^(advertisement|story continues|view comments|recommended stories)/i.test(t)) continue;
+      if (links(line) >= 3 && links(line) * 40 > t.length) continue;   // a row of links: navigation
+      if (/^#{1,6}\s/.test(line)) { if (t.length > 2 && t.length < 120) blocks.push({ t: "h", text: t }); }
+      else if (/^[-*+]\s|^\d+\.\s/.test(line)) { if (t.length >= 15) blocks.push({ t: "li", text: t }); }
+      else if (/^>/.test(line)) { if (t.length >= 20) blocks.push({ t: "q", text: t }); }
+      else if (t.length >= 30) blocks.push({ t: "p", text: t });
+    }
+    const words = blocks.filter(b => b.t !== "h").reduce((n, b) => n + b.text.split(/\s+/).length, 0);
+    log.push(`Jina Reader: HTTP ${code}, ${words} words${words < 80 ? " (too few)" : ""}`);
+    startLog(`Read through Jina Reader: ${words} words from ${url.slice(0, 60)}`);
+    return proxyCache[url] = words >= 80 ? { blocks: blocks.slice(0, 400), words, minutes: Math.max(1, Math.round(words / 230)), via: "jina" } : null;
+  } catch (e) { log.push("Jina Reader failed: " + String(e.message || e).slice(0, 160)); startLog("Jina Reader failed: " + (e.message || e)); return proxyCache[url] = null; }
+}
+
 function extractReader(html) {
   const meta = name => { const m = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]*>`, "i")); return m ? toText(attr(m[0], "content")) : ""; };
   let image = meta("og:image") || meta("twitter:image");
@@ -815,22 +1006,41 @@ function extractReader(html) {
   return { blocks: blocks.slice(0, 400), image, byline, words, minutes: Math.max(1, Math.round(words / 230)) };
 }
 const readerCache = {};   // id → the article's text, for questions about it (this session only)
-async function readArticle(a) {   // { blocks, image, byline, words, minutes } or { blocked: why }
+// 1.2.0: pages come through fetchPage() (consent walls, Google News links) and, when the page itself can't be read,
+// Jina Reader (proxyRead); both in page-fetch.scriptable.js. Every step is logged; a blocked result carries the log
+// as `trace`, which the reader shows under "What <App> tried", and the failure goes to the start-up log.
+const origOf = {};   // an item's link → the publisher's own address once known (for Original ↗)
+async function readArticle(a) {   // { blocks, image, byline, words, minutes, via? } or { blocked: why, trace }
+  const log = [], keep = px => { readerCache[a.id] = px.blocks.map(b => b.text).join("\n\n"); return px; };
+  const fail = (why) => { startLog(`Article not read: ` + log.join(" → ").slice(0, 400)); return { blocked: why, trace: log }; };
   let r;
-  try { r = await fetchText(a.link, 20); }
-  catch (e) {
-    const code = (String(e.message || e).match(/HTTP (\d+)/) || [])[1];
-    return { blocked: ["401", "402", "403", "451"].includes(code) ? "signin" : "unreachable" };
+  try {
+    r = await fetchPage(a.link, log);
+    if (!r.html && typeof findSameStory === "function") {   // optional: the same story somewhere the app can read
+      const alt = await findSameStory(a, log);
+      if (alt) { r = await fetchPage(alt, log); origOf[a.link] = alt; }
+    }
+  } catch (e) {
+    log.push("Couldn't open it: " + String(e.message || e).slice(0, 80));
+    const code = (String(e.message || e).match(/HTTP (\d+)/) || [])[1], px = await proxyRead(a.link, log);
+    if (px) return keep(px);
+    return fail(["401", "402", "403", "451"].includes(code) ? "signin" : "unreachable");
   }
-  const rd = extractReader(r.text);
+  if (r.url && !/consent|guce|news\.google\./i.test(r.url)) origOf[a.link] = origOf[a.link] || r.url;
+  const proxyUrl = r.url && !/consent|guce|news\.google\./i.test(r.url) ? r.url : a.link;
+  if (!r.html) { const px = await proxyRead(proxyUrl, log); if (px) return keep(px); return fail(/consent|guce/i.test(r.url || "") ? "consent" : "unreachable"); }
+  const rd = extractReader(r.html);
+  log.push(`Found ${rd.words} words of article text on the page`);
   if (rd.words >= 120) {
     readerCache[a.id] = rd.blocks.filter(b => b.t !== "pre").map(b => b.text).join("\n\n");
     return rd;
   }
-  const html = r.text;
+  const px = await proxyRead(proxyUrl, log);
+  if (px) return Object.assign({ image: rd.image, byline: rd.byline }, keep(px));
+  const html = r.html;
   const why = /subscribe to (continue|read)|subscribers?[- ]only|paywall|(sign|log) in to (continue|read)|create a (free )?account to/i.test(html) ? "signin"
     : /cookie|consent|gdpr|privacy (choices|settings)|accept all/i.test(html) ? "consent" : "unreadable";
-  return { blocked: why };
+  return fail(why);
 }
 // Questions about one article, answered from its text
 async function askArticle(a, q, hist) {
@@ -1028,7 +1238,7 @@ function clientState() {
     cfgSchema: CONFIG.map(([title, items]) => ({ title, items })),
     categories: CATS.map(c => ({ id: c[0], label: c[1], color: c[2] })),
     settings: {
-      groupBy: settings.groupBy, view: settings.view, readOnOpen: settings.readOnOpen, openInReader: settings.openInReader !== false, ai: settings.ai, aiProvider: settings.aiProvider, hasKey: !!aiKey(), shareUsage: !!settings.shareUsage, checkUpdates: settings.checkUpdates !== false,
+      groupBy: settings.groupBy, view: settings.view, readOnOpen: settings.readOnOpen, openInReader: settings.openInReader !== false, readerProxy: settings.readerProxy !== false, ai: settings.ai, aiProvider: settings.aiProvider, hasKey: !!aiKey(), shareUsage: !!settings.shareUsage, checkUpdates: settings.checkUpdates !== false,
       voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1, voiceGender: settings.voiceGender || "all",
       speechEngine: settings.speechEngine || "device", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
       ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"),
@@ -1036,6 +1246,7 @@ function clientState() {
     },
     story: (() => { const st = stories[storyKey()]; return st ? Object.assign({}, st, { stale: st.sig !== storySig(st.scope, st.cat) }) : null; })(),
     picksReady: pk.ready, rated: pk.n, lastScan: settings.lastScan, palettes: PALETTES, version: VERSION,
+    secrets: Object.fromEntries(Object.keys(SECRETS).map(id => [id, { name: SECRETS[id].name, last4: (secretFor(id) || "").slice(-4) || null }])),
     usageAvailable: usageAvailable(), usageStatus: usageStatus(), usageAsk: usageAvailable() && !settings.usageAsked && !settings.shareUsage,
     ttsModels: settings.ttsModels || null,
     blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO,
@@ -1093,9 +1304,12 @@ async function handle(m) {
     case "rate": if (a) { a.rating = m.v || 0; if (a.rating) { a.read = 1; track("post_rated", { stars: a.rating }); } }
       { const pk = computePicks(Object.values(articles), cfg("picksMinRatings"), cfg("picksThreshold")); call("onPicks", pk); } break;
     case "markAll": for (const id of m.ids || []) if (articles[id]) articles[id].read = 1; break;
-    case "open": if (a && a.link) { if (settings.readOnOpen) { a.read = 1; saveWidget(widgetSnapshot()); } saveAll(); if (!m.orig) track("post_opened"); await Safari.openInApp(a.link, false); } return;   // orig: from the reader's Original button
+    case "open": if (a && a.link) { if (settings.readOnOpen) { a.read = 1; saveWidget(widgetSnapshot()); } saveAll(); if (!m.orig) track("post_opened"); await Safari.openInApp(m.orig ? (origOf[a.link] || a.link) : a.link, false); } return;   // orig: from the reader's Original button (the publisher, once known)
+    case "secret-set": if (SECRETS[m.v] && await askSecret(m.v)) { toast(`${SECRETS[m.v].name} saved`); if (m.v === "jina") for (const k of Object.keys(proxyCache)) delete proxyCache[k]; } return push();
+    case "secret-remove": if (SECRETS[m.v] && Keychain.contains(SECRETS[m.v].key)) { Keychain.remove(SECRETS[m.v].key); toast(`${SECRETS[m.v].name} removed`); } return push();
     case "reader": {   // a post opened in the reader: mark it, then fetch its text (unless the page already has it)
       if (!a) return;
+      if (m.refetch) { delete readerCache[a.id]; delete proxyCache[a.link]; delete proxyCache[origOf[a.link]]; }   // Try again (1.2.0): nothing remembered
       if (settings.readOnOpen && !a.read) { a.read = 1; saveAll(); saveWidget(widgetSnapshot()); }
       track("post_opened");
       if (m.cached) return;
@@ -1111,7 +1325,7 @@ async function handle(m) {
       return call("onAsk", a.id, res);
     }
     case "set": if (m.k === "shareUsage") { setUsage(m.v === true || m.v === "true" || m.v === "1"); return push(); }
-      if (["groupBy", "view", "readOnOpen", "openInReader", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "speechEngine", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v; break;
+      if (["groupBy", "view", "readOnOpen", "openInReader", "readerProxy", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "speechEngine", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v; break;
     case "refresh": return runScan();
     case "usage-consent": setUsage(m.on === "1"); flushUsage(); return push();
     case "usage-test": {
@@ -1265,7 +1479,7 @@ function clientApp() {
   let view = S.settings.view || "unread", group = S.settings.groupBy || "day", storyScope = S.settings.storyScope || "new";
   if (view === "story" && !S.settings.hasKey) view = "unread";
   let tldrId = null; const tl = {}, expanded = new Set();
-  let cfgOpen = false, cfgArmed = false;
+  let cfgOpen = false, cfgArmed = false, secArmed = null;
   const cfgItem = k => { for (const sec of S.cfgSchema) for (const d of sec.items) if (d.k === k) return d; return null; };
   const cfgChanged = k => { const d = cfgItem(k); return d && JSON.stringify(S.cfg[k]) !== JSON.stringify(d.def); };
   const fmtCfg = (d, v) => d.step && d.step < 1 ? Number(v).toFixed(String(d.step).split(".")[1].length) : String(v);
@@ -1351,6 +1565,9 @@ function clientApp() {
       <h3 class="sec">Appearance</h3>${lookHTML()}
       <h3 class="sec">Reading</h3>
       <div class="srow"><div class="grow"><b>Open posts in the reader</b><small class="muted">The post's own text in BlogPulse, with Listen and questions. Off: open it in Safari</small></div><button class="switch ${S.settings.openInReader !== false ? "on" : ""}" data-act="toggle" data-v="openInReader" aria-label="Open posts in the reader"></button></div>
+      <div class="srow"><div class="grow"><b>Read blocked pages through Jina Reader</b><small class="muted">When a post won't open from your phone (a consent page, pages built by scripts), its public address goes to r.jina.ai, which returns the text</small></div><button class="switch ${S.settings.readerProxy !== false ? "on" : ""}" data-act="toggle" data-v="readerProxy" aria-label="Read blocked pages through Jina Reader"></button></div>
+      <div class="srow"><div class="grow"><b>Jina Reader key (optional)</b><small class="muted">${((S.secrets && S.secrets.jina) || {}).last4 ? "Saved, ending …" + esc(((S.secrets && S.secrets.jina) || {}).last4) : "Not set"}. Free at jina.ai; only needed if Jina Reader refuses without one.</small></div>
+        <button class="sm" data-act="secret-set" data-v="jina">${((S.secrets && S.secrets.jina) || {}).last4 ? "Change" : "Add"}</button>${((S.secrets && S.secrets.jina) || {}).last4 ? `<button class="sm danger ${secArmed === "jina" ? "armed" : ""}" data-act="secret-remove" data-v="jina">${secArmed === "jina" ? "Confirm" : "Remove"}</button>` : ""}</div>
       <div class="srow"><div class="grow"><b>Mark as read when opened</b><small class="muted">Off: you mark posts read yourself</small></div><button class="switch ${S.settings.readOnOpen ? "on" : ""}" data-act="toggle" data-v="readOnOpen" aria-label="Mark as read when opened"></button></div>
       <div class="srow"><div class="grow"><b>Picks</b><small class="muted">${S.picksReady ? `Learning from ${S.rated} ratings` : `Rate ${Math.max(0, S.cfg.picksMinRatings - S.rated)} more post${S.cfg.picksMinRatings - S.rated === 1 ? "" : "s"} to switch on`}</small></div></div>
       <h3 class="sec">Listening</h3>${listenHTML()}
@@ -2030,7 +2247,8 @@ function clientApp() {
     if (d.loading) { el.innerHTML = `<p class="note rd-wait"><span class="busy-dot"></span> Getting the article from ${esc(pageHost(a.link))}…</p><div class="rd-skel"><i></i><i></i><i></i><i></i><i></i></div>`; return; }
     if (d.blocked) {
       const [h, p] = RD_WHY[d.blocked] || RD_WHY.unreadable;
-      el.innerHTML = `<div class="rd-blocked"><b>${esc(h)}</b><p>${esc(p)}</p><button class="sm primary" data-act="rdorig">Open the article ↗</button></div>
+      el.innerHTML = `<div class="rd-blocked"><b>${esc(h)}</b><p>${esc(p)}</p><div class="aic-btns"><button class="sm primary" data-act="rdorig">Open the article ↗</button><button class="sm" data-act="rdrefetch">Try again</button></div>
+      ${(d.trace || []).length ? `<details class="rd-trace"><summary>What BlogPulse tried</summary><ol>${d.trace.map(t => `<li>${esc(t)}</li>`).join("")}</ol></details>` : ""}</div>
         ${d.excerpt ? `<h2 class="rd-h">From the feed</h2>${rdBlocks([{ t: "p", text: d.excerpt }], "x")}` : ""}`;
       return;
     }
@@ -2482,6 +2700,12 @@ function clientApp() {
       case "rdask": { const c = $("#rdChat"); if (c && c.scrollIntoView) c.scrollIntoView({ block: "start", behavior: "smooth" }); setTimeout(() => { const q = $("#rdQ"); if (q) q.focus(); }, 450); break; }
       case "rdsugg": rdAsk(v); break;
       case "rdsend": { const q = $("#rdQ"); if (q) rdAsk(q.value); break; }
+      case "rdrefetch": if (rdId) { rdData[rdId] = { loading: true }; send("reader", { id: rdId, refetch: true }); renderReaderText(); } break;   // not "rdretry": that retries a question
+      case "secret-set": send("secret-set", { v }); break;
+      case "secret-remove":
+        if (secArmed === v) { secArmed = null; send("secret-remove", { v }); }
+        else { secArmed = v; renderCfg(); setTimeout(() => { if (secArmed === v) { secArmed = null; renderCfg(); } }, 3500); }
+        break;
       case "rdretry": { const list = rdChat[rdId] || [], m = list[+v]; if (m) { list.splice(+v, 1); rdAsk(m.q); } break; }
       case "read": a.read = !a.read; keep.add(a.id); send("read", { id, v: a.read }); refreshCard(a); if (tldrId) renderTldr(); break;
       case "listengroup": { send("usage-listen", { kind: "group" }); const items = (groupIdx[v] || []).map(postItem); if (items.length) speak(label(+v)[0], items, undefined, "summaries"); break; }
@@ -2963,6 +3187,9 @@ html[data-font=serif] .rd-p,html[data-font=serif] .rd-ul li,html[data-font=serif
 .rd-skel i{display:block;height:14px;margin:14px 0;border-radius:7px;background:var(--rule);opacity:.55}
 .rd-skel i:nth-child(3n){width:72%}
 .rd-blocked{background:var(--amber-wash);border:1px solid var(--amber);border-radius:14px;padding:16px;margin:0 0 20px}
+.rd-trace{margin-top:12px;font-size:calc(12.5px * var(--ts));color:var(--muted);text-align:left}
+.rd-trace summary{font-weight:700;color:var(--signal)}
+.rd-trace ol{margin:6px 0 0;padding-left:1.3em} .rd-trace li{margin:3px 0;-webkit-user-select:text;user-select:text}
 .rd-blocked b{display:block;font-size:calc(17px * var(--ts));margin-bottom:4px}
 .rd-blocked p{margin:0 0 12px;color:var(--ink-2)}
 .rd-chat{margin-top:30px;padding-top:20px;border-top:1px solid var(--rule)}
