@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.19.1';
+const VERSION = '1.19.2';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -65,7 +65,7 @@ const BLUEPRINTS = [
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.6.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.8.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.12.0' },
-  { id: 'read-aloud', name: 'Read aloud', version: '1.2.0', since: '1.19.0' },
+  { id: 'read-aloud', name: 'Read aloud', version: '1.2.2', since: '1.19.2' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.14.0' },
 ];
 
@@ -1969,14 +1969,29 @@ function clientApp() {
   const LEGACY_TTS = new Set(["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]);
   const aiTTS = () => S.settings.speechEngine === "ai" && S.settings.hasOpenAI;
   const au = new Audio(); au.preload = "auto"; au.setAttribute("playsinline", "");
-  const SILENT = (() => {   // 0.1 s of silence as a WAV, to unlock audio inside the tap
-    const n = 800, buf = new Uint8Array(44 + n), dv = new DataView(buf.buffer);
+  const silentWav = secs => {   // silence as an 8 kHz WAV data URI
+    const n = Math.round(8000 * secs), buf = new Uint8Array(44 + n), dv = new DataView(buf.buffer);
     const w = (o, t) => { for (let i = 0; i < t.length; i++) buf[o + i] = t.charCodeAt(i); };
     w(0, "RIFF"); dv.setUint32(4, 36 + n, true); w(8, "WAVE"); w(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
     dv.setUint32(24, 8000, true); dv.setUint32(28, 8000, true); dv.setUint16(32, 1, true); dv.setUint16(34, 8, true); w(36, "data"); dv.setUint32(40, n, true); buf.fill(128, 44);
     let str = ""; buf.forEach(b => { str += String.fromCharCode(b); }); return "data:audio/wav;base64," + btoa(str);
-  })();
+  };
+  const SILENT = silentWav(0.1);   // to unlock audio inside the tap
   function unlockAudio() { try { au.src = SILENT; const p = au.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+  // Silent mode: iOS mutes a page's sound while the Ring/Silent switch is on, unless the page plays media.
+  // So while reading: the page declares itself a media player (navigator.audioSession, iOS 17+), and for the
+  // iPhone voice a looping second of silence keeps it one on older iOS too. Started inside the tap.
+  const keepAwake = new Audio(); keepAwake.loop = true; keepAwake.setAttribute("playsinline", "");
+  let keepSrc = "";
+  function audioOn(engine) {
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+    if (engine === "ai") return;   // the AI voice is media itself (and iOS plays one media element at a time)
+    try { if (!keepSrc) keepAwake.src = keepSrc = silentWav(1); const p = keepAwake.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+  }
+  function audioOff() {
+    try { keepAwake.pause(); } catch (e) {}
+    try { if (navigator.audioSession) navigator.audioSession.type = "auto"; } catch (e) {}   // other apps' music can play again
+  }
   function aiFetch(part) {
     if (part.audio) return Promise.resolve(part.audio);
     if (!part.pending) part.pending = new Promise((res, rej) => send("ttsaudio", { text: part.t }, (ok, msg) => ok ? res(part.audio = msg) : rej(msg)));
@@ -2020,6 +2035,7 @@ function clientApp() {
     }
     stopSpeaking(true);
     if (ai) unlockAudio();   // has to happen inside the tap, before any waiting
+    audioOn(ai ? "ai" : "device");   // plays with the Ring/Silent switch on, too
     tts.engine = ai ? "ai" : "device";
     tts.items = items; tts.label = label; tts.i = 0; tts.paused = false; tts.on = true;
     tts.kind = kind || ""; tts.id = (items[0] && items[0].id) || ""; tts.nowSeg = -1;
@@ -2047,14 +2063,14 @@ function clientApp() {
     if (SYN) SYN.cancel();
     document.querySelectorAll(".rs-now,.rs-done").forEach(el => el.classList.remove("rs-now", "rs-done"));
     tts.nowSeg = -1;
-    if (!quiet) { renderPlayer(); if (raOpen) { raOpen = false; renderReadAlong(); } }
+    if (!quiet) { audioOff(); renderPlayer(); if (raOpen) { raOpen = false; renderReadAlong(); } }
   }
   function togglePause() {
     if (!tts.on) return;
     if (tts.engine === "ai") {
       if (tts.paused) { tts.paused = false; if (!tts.loading) { const pr = au.play(); if (pr && pr.catch) pr.catch(() => {}); } }
       else { tts.paused = true; au.pause(); }
-    } else if (tts.paused) { SYN.resume(); tts.paused = false; } else { SYN.pause(); tts.paused = true; }
+    } else if (tts.paused) { audioOn("device"); SYN.resume(); tts.paused = false; } else { SYN.pause(); try { keepAwake.pause(); } catch (e) {} tts.paused = true; }
     renderPlayer();
   }
   function skipItem() {
@@ -2182,7 +2198,8 @@ function clientApp() {
   }
   window.onArticleText = (id, r) => {
     const a = byId(id); if (!a) return;
-    if (r.error) return toast(r.error);
+    if (!(tts.on && tts.kind === "article" && tts.id === id)) return;   // stopped (or something else started) while it loaded
+    if (r.error) { stopSpeaking(); return toast(r.error); }
     const paras = r.blocks ? articleParas(r.blocks) : r.paras.map((t, i) => ({ key: "x" + i, text: t }));
     speak(srcTitle(a), [{ id, title: a.title, paras: head(a).concat(paras) }], undefined, "article");
     if (r.partial) toast("The full page couldn't be read, so this is the excerpt");
@@ -2213,7 +2230,7 @@ function clientApp() {
   }
   window.onReader = (id, res) => {
     rdData[id] = res;
-    if (rdListenSoon === id) { rdListenSoon = ""; if (rdId === id) { readerSpeak(); } }
+    if (rdListenSoon === id) { rdListenSoon = ""; if (rdId === id && tts.on && tts.kind === "article" && tts.id === id) readerSpeak(); }   // not if stopped meanwhile
     if (rdId === id) { renderReaderMeta(); renderReaderText(); renderReaderChat(); }
   };
   function renderReader() {
