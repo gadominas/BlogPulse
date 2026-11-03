@@ -2,6 +2,20 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.19.1 (2026-11-03): Works without iCloud
+
+- 📱 **Opens without iCloud**: BlogPulse now opens on iPhones that aren't signed in to iCloud.
+- 💾 **Kept on the phone**: Without iCloud, your blogs and reading are saved on the phone instead.
+- ☁️ **iCloud as before**: Signed in to iCloud? Nothing changes: everything stays in iCloud Drive.
+
+**Changes**
+
+- Without iCloud, BlogPulse keeps its data in Files › On My iPhone › Scriptable › BlogPulse
+
+**Fixes**
+
+- On an iPhone not signed in to iCloud, BlogPulse stopped at once with "iCloud is not supported"
+
 ## 1.19.0 (2026-11-03): Fewer walls
 
 - 🍪 **Past consent pages**: Posts behind Yahoo's and Google's cookie pages in Europe now open in the reader.
