@@ -2,6 +2,16 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.19.3 (2026-11-03): Silent mode, shared
+
+- 🔔 **Still heard in silent mode**: Read aloud keeps playing with the Ring/Silent switch on.
+- 🎵 **Your music comes back**: Other apps' music can play again as soon as reading stops.
+- 🧩 **Shared with your apps**: Settings › Built with lists Sound in silent mode, now a blueprint.
+
+**Changes**
+
+- The silent-mode sound code is now the shared Sound in silent mode blueprint (1.0.0); Read aloud follows 1.2.3
+
 ## 1.19.2 (2026-11-03): Listen with silent mode on
 
 - 🔔 **Plays in silent mode**: Read aloud is heard even with the Ring/Silent switch on.

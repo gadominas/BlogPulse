@@ -4,6 +4,32 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.19.3",
+      "date": "2026-11-03",
+      "title": "Silent mode, shared",
+      "highlights": [
+        {
+          "icon": "🔔",
+          "title": "Still heard in silent mode",
+          "text": "Read aloud keeps playing with the Ring/Silent switch on."
+        },
+        {
+          "icon": "🎵",
+          "title": "Your music comes back",
+          "text": "Other apps' music can play again as soon as reading stops."
+        },
+        {
+          "icon": "🧩",
+          "title": "Shared with your apps",
+          "text": "Settings › Built with lists Sound in silent mode, now a blueprint."
+        }
+      ],
+      "changes": [
+        "The silent-mode sound code is now the shared Sound in silent mode blueprint (1.0.0); Read aloud follows 1.2.3"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.19.2",
       "date": "2026-11-03",
       "title": "Listen with silent mode on",
