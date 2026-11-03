@@ -2,6 +2,21 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.19.2 (2026-11-03): Listen with silent mode on
+
+- 🔔 **Plays in silent mode**: Read aloud is heard even with the Ring/Silent switch on.
+- 🎵 **Music comes back**: When reading stops, other apps' music can play again.
+- ⏹ **Stop means stop**: Stopping while an article loads no longer starts it a moment later.
+
+**Changes**
+
+- While reading, BlogPulse tells iOS it's playing media, so the iPhone voice and the AI voice play with the Ring/Silent switch on
+
+**Fixes**
+
+- Read aloud was silent with the Ring/Silent switch on
+- Stopping Article or the reader's Listen while the article was still loading started reading anyway when it arrived
+
 ## 1.19.1 (2026-11-03): Works without iCloud
 
 - 📱 **Opens without iCloud**: BlogPulse now opens on iPhones that aren't signed in to iCloud.
