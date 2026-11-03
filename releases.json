@@ -4,6 +4,34 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.19.0",
+      "date": "2026-11-03",
+      "title": "Fewer walls",
+      "highlights": [
+        {
+          "icon": "🍪",
+          "title": "Past consent pages",
+          "text": "Posts behind Yahoo's and Google's cookie pages in Europe now open in the reader."
+        },
+        {
+          "icon": "📰",
+          "title": "Straight to the publisher",
+          "text": "Google News links open the publisher's own page, in the reader and with Original."
+        },
+        {
+          "icon": "🔁",
+          "title": "Try again, see why",
+          "text": "A post that won't open shows what BlogPulse tried and a Try again button."
+        }
+      ],
+      "changes": [
+        "Read aloud 1.2.0: pages come through the shared page fetcher, answering Yahoo's and Google's consent walls, following Google News links and logging each step to the start-up log",
+        "When a page still won't open, Jina Reader reads it (Settings › Reading, on by default; only the public address is sent), with an optional Jina key in the Keychain",
+        "The reader's blocked card has Try again and What BlogPulse tried; Original opens the publisher"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.18.0",
       "date": "2026-11-02",
       "title": "Invite, your way",

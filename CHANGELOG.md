@@ -2,6 +2,18 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.19.0 (2026-11-03): Fewer walls
+
+- 🍪 **Past consent pages**: Posts behind Yahoo's and Google's cookie pages in Europe now open in the reader.
+- 📰 **Straight to the publisher**: Google News links open the publisher's own page, in the reader and with Original.
+- 🔁 **Try again, see why**: A post that won't open shows what BlogPulse tried and a Try again button.
+
+**Changes**
+
+- Read aloud 1.2.0: pages come through the shared page fetcher, answering Yahoo's and Google's consent walls, following Google News links and logging each step to the start-up log
+- When a page still won't open, Jina Reader reads it (Settings › Reading, on by default; only the public address is sent), with an optional Jina key in the Keychain
+- The reader's blocked card has Try again and What BlogPulse tried; Original opens the publisher
+
 ## 1.18.0 (2026-11-02): Invite, your way
 
 - 👤 **Who it's for**: Invite asks who you're sending to before it writes anything.
