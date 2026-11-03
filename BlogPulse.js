@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.19.2';
+const VERSION = '1.19.3';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -65,7 +65,8 @@ const BLUEPRINTS = [
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.6.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.8.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.12.0' },
-  { id: 'read-aloud', name: 'Read aloud', version: '1.2.2', since: '1.19.2' },
+  { id: 'audio-playback', name: 'Sound in silent mode', version: '1.0.0', since: '1.19.3' },
+  { id: 'read-aloud', name: 'Read aloud', version: '1.2.3', since: '1.19.3' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.14.0' },
 ];
 
@@ -1969,6 +1970,10 @@ function clientApp() {
   const LEGACY_TTS = new Set(["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]);
   const aiTTS = () => S.settings.speechEngine === "ai" && S.settings.hasOpenAI;
   const au = new Audio(); au.preload = "auto"; au.setAttribute("playsinline", "");
+  // ── Sound with the Ring/Silent switch on (app-blueprints · audio-playback 1.0.0) ──
+  // iOS mutes a page's sound while the switch is on, unless the page plays media. While the app is making sound
+  // the user asked for, it declares itself a media player (navigator.audioSession, iOS 17+); for speech and
+  // Web Audio a looping second of silence does the same on older iOS. Start inside a tap; stop with the sound.
   const silentWav = secs => {   // silence as an 8 kHz WAV data URI
     const n = Math.round(8000 * secs), buf = new Uint8Array(44 + n), dv = new DataView(buf.buffer);
     const w = (o, t) => { for (let i = 0; i < t.length; i++) buf[o + i] = t.charCodeAt(i); };
@@ -1976,22 +1981,24 @@ function clientApp() {
     dv.setUint32(24, 8000, true); dv.setUint32(28, 8000, true); dv.setUint16(32, 1, true); dv.setUint16(34, 8, true); w(36, "data"); dv.setUint32(40, n, true); buf.fill(128, 44);
     let str = ""; buf.forEach(b => { str += String.fromCharCode(b); }); return "data:audio/wav;base64," + btoa(str);
   };
-  const SILENT = silentWav(0.1);   // to unlock audio inside the tap
-  function unlockAudio() { try { au.src = SILENT; const p = au.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
-  // Silent mode: iOS mutes a page's sound while the Ring/Silent switch is on, unless the page plays media.
-  // So while reading: the page declares itself a media player (navigator.audioSession, iOS 17+), and for the
-  // iPhone voice a looping second of silence keeps it one on older iOS too. Started inside the tap.
   const keepAwake = new Audio(); keepAwake.loop = true; keepAwake.setAttribute("playsinline", "");
-  let keepSrc = "";
-  function audioOn(engine) {
+  let keepSrc = "", audioOffT = null;
+  // kind: "speech" (Web Speech), "webaudio" (an AudioContext), "media" (the sound is an <audio> element itself:
+  // iOS plays one media element at a time, so no silence loop next to it)
+  function audioOn(kind) {
+    clearTimeout(audioOffT);
     try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
-    if (engine === "ai") return;   // the AI voice is media itself (and iOS plays one media element at a time)
+    if (kind === "media") return;
     try { if (!keepSrc) keepAwake.src = keepSrc = silentWav(1); const p = keepAwake.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
   }
-  function audioOff() {
+  function audioOff() {   // other apps' music can play again
+    clearTimeout(audioOffT);
     try { keepAwake.pause(); } catch (e) {}
-    try { if (navigator.audioSession) navigator.audioSession.type = "auto"; } catch (e) {}   // other apps' music can play again
+    try { if (navigator.audioSession) navigator.audioSession.type = "auto"; } catch (e) {}
   }
+  function audioOffSoon(ms) { clearTimeout(audioOffT); audioOffT = setTimeout(audioOff, ms); }   // sounds that come and go (games, timers)
+  const SILENT = silentWav(0.1);   // to unlock audio inside the tap
+  function unlockAudio() { try { au.src = SILENT; const p = au.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
   function aiFetch(part) {
     if (part.audio) return Promise.resolve(part.audio);
     if (!part.pending) part.pending = new Promise((res, rej) => send("ttsaudio", { text: part.t }, (ok, msg) => ok ? res(part.audio = msg) : rej(msg)));
@@ -2035,7 +2042,7 @@ function clientApp() {
     }
     stopSpeaking(true);
     if (ai) unlockAudio();   // has to happen inside the tap, before any waiting
-    audioOn(ai ? "ai" : "device");   // plays with the Ring/Silent switch on, too
+    audioOn(ai ? "media" : "speech");   // plays with the Ring/Silent switch on, too (audio-playback)
     tts.engine = ai ? "ai" : "device";
     tts.items = items; tts.label = label; tts.i = 0; tts.paused = false; tts.on = true;
     tts.kind = kind || ""; tts.id = (items[0] && items[0].id) || ""; tts.nowSeg = -1;
@@ -2070,7 +2077,7 @@ function clientApp() {
     if (tts.engine === "ai") {
       if (tts.paused) { tts.paused = false; if (!tts.loading) { const pr = au.play(); if (pr && pr.catch) pr.catch(() => {}); } }
       else { tts.paused = true; au.pause(); }
-    } else if (tts.paused) { audioOn("device"); SYN.resume(); tts.paused = false; } else { SYN.pause(); try { keepAwake.pause(); } catch (e) {} tts.paused = true; }
+    } else if (tts.paused) { audioOn("speech"); SYN.resume(); tts.paused = false; } else { SYN.pause(); try { keepAwake.pause(); } catch (e) {} tts.paused = true; }
     renderPlayer();
   }
   function skipItem() {
