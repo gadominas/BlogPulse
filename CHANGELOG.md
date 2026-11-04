@@ -2,6 +2,18 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.20.0 (2026-11-04): Invite, then you decide
+
+- ✍️ **See it before it goes**: The invitation appears in the dialog: read it, edit it if you like.
+- 📋 **Copy or Share**: Copy puts it on the clipboard; Share opens the share sheet. Only when you tap.
+- 📰 **Title and description**: Every invitation ends with the post's title, a short description and the link.
+
+**Changes**
+
+- Invite: ✦ Write invitation shows the result in the dialog with Copy and Share…, ✦ Write again and Done; nothing opens on its own
+- Invitations end with the post: “Title” — blog, a one- or two-sentence description, the link (also in the TL;DR composer and the plain invitation)
+- Closing the dialog while it writes keeps the invitation: Invite shows it again
+
 ## 1.19.4 (2026-11-04): Opens on any iPhone
 
 - 📱 **Opens on any iPhone**: BlogPulse opens on iPhones that aren't signed in to iCloud, every time.

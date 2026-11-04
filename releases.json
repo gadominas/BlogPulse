@@ -4,6 +4,34 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.20.0",
+      "date": "2026-11-04",
+      "title": "Invite, then you decide",
+      "highlights": [
+        {
+          "icon": "✍️",
+          "title": "See it before it goes",
+          "text": "The invitation appears in the dialog: read it, edit it if you like."
+        },
+        {
+          "icon": "📋",
+          "title": "Copy or Share",
+          "text": "Copy puts it on the clipboard; Share opens the share sheet. Only when you tap."
+        },
+        {
+          "icon": "📰",
+          "title": "Title and description",
+          "text": "Every invitation ends with the post's title, a short description and the link."
+        }
+      ],
+      "changes": [
+        "Invite: ✦ Write invitation shows the result in the dialog with Copy and Share…, ✦ Write again and Done; nothing opens on its own",
+        "Invitations end with the post: “Title” — blog, a one- or two-sentence description, the link (also in the TL;DR composer and the plain invitation)",
+        "Closing the dialog while it writes keeps the invitation: Invite shows it again"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.19.4",
       "date": "2026-11-04",
       "title": "Opens on any iPhone",
