@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.19.4';
+const VERSION = '1.20.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -1108,9 +1108,7 @@ async function makeTldr(a) {
 
 // ---------- invite someone to read a post ----------
 function inviteTemplate(a, who) {   // the plain invitation, without AI
-  const src = (sources.find(s => s.id === a.src) || {}).title || hostOf(a.link);
-  const t = a.tldr || {}, lead = t.lead || a.ai || a.desc || "";
-  return { kind: "template", text: `${who ? "Hi " + who + ", t" : "T"}hought you'd find this worth a read: “${a.title}” from ${src}.${lead ? " " + lead : ""}\n\n${a.link}` };
+  return { kind: "template", text: `${who ? "Hi " + who + ", t" : "T"}hought you'd find this worth a read.\n\n${inviteCard(a)}` };
 }
 async function makeInvite(a, who, instr) {
   const src = (sources.find(s => s.id === a.src) || {}).title || hostOf(a.link);
@@ -1125,7 +1123,15 @@ Published by: ${src}
 ${t.lead ? "TL;DR: " + t.lead + "\n" : ""}${t.points && t.points.length ? "Key points:\n" + t.points.map(x => "- " + x).join("\n") + "\n" : ""}${t.why ? "Why it matters: " + t.why + "\n" : ""}Excerpt: ${(a.ex || a.ai || a.desc || "").slice(0, 1500)}`;
   const msg = (await aiCall(system, user, 700, "invite")).trim().replace(/^["“]+|["”]+$/g, "").trim();
   if (!msg) throw new Error("the AI returned an empty message");
-  return { kind: "ai", provider: settings.aiProvider, text: msg + "\n\n" + a.link };
+  return { kind: "ai", provider: settings.aiProvider, text: msg + "\n\n" + inviteCard(a) };
+}
+// The post itself, under every invitation: title, blog, a one- or two-sentence description, the link
+function inviteCard(a) {
+  const src = (sources.find(s => s.id === a.src) || {}).title || hostOf(a.link);
+  const t = a.tldr || {};
+  let d = String(t.lead || a.ai || a.desc || "").replace(/\s+/g, " ").trim();
+  if (d.length > 280) { const cut = d.slice(0, 280); const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? ")); d = end > 80 ? cut.slice(0, end + 1) : cut.replace(/\s+\S*$/, "") + "…"; }
+  return `“${a.title}” — ${src}${d ? "\n" + d : ""}\n${a.link}`;
 }
 
 // ---------- AI voice: OpenAI's speech endpoint (Claude's API has no speech output) ----------
@@ -1374,7 +1380,7 @@ async function handle(m) {
       saveAll(); return call("onInvite", a.id, res);
     }
     case "share": if (m.text) await ShareSheet.present([m.text]); return;
-    case "quickinvite": {   // from the Invite dialog: write the invitation for that person, then straight to the share sheet
+    case "quickinvite": {   // from the Invite dialog: write the invitation for that person; Copy and Share are the user's taps
       if (!a) return;
       const who = String(m.who || "").trim().slice(0, 120), instr = String(m.instr || "").trim().slice(0, 1000);
       if (instr) { settings.inviteInstr = instr; saveAll(); }
@@ -1382,11 +1388,9 @@ async function handle(m) {
       try { res = await makeInvite(a, who, instr); }
       catch (e) { res = inviteTemplate(a, who); fallback = true; }   // the AI failed: share the plain invitation instead of nothing
       track("invite_made");
-      call("onQuickInvite", a.id, { kind: res.kind, fallback });
-      await ShareSheet.present([res.text]);
-      return;
+      return call("onQuickInvite", a.id, { kind: res.kind, provider: res.provider || "", fallback, text: res.text });
     }
-    case "copy": if (m.text) { Pasteboard.copy(m.text); toast("Invite copied"); } return;
+    case "copy": if (m.text) { Pasteboard.copy(m.text); toast("Invitation copied"); } return;
     case "tldr": {
       if (!a) return;
       const wantAI = m.force && aiKey();
@@ -1870,13 +1874,12 @@ function clientApp() {
     quickInv.add(a.id);
     if (instr) S.settings.inviteInstr = instr;
     document.querySelectorAll(`[data-act="quickinvite"][data-id="${a.id}"]`).forEach(b => b.classList.add("busy"));
-    if (S.settings.hasKey) toast("✦ Writing the invite…");
     send("quickinvite", { id: a.id, who, instr });
   }
   // Invite asks first: who it's for and how to write it (empty for every post; ↺ brings back the last instructions)
   let qiId = "";
   function openInviteDialog(a) {
-    if (!a || quickInv.has(a.id) || document.getElementById("invdlg")) return;
+    if (!a || document.getElementById("invdlg")) return;
     qiId = a.id;
     const ai = S.settings.hasKey;
     const ov = document.createElement("div"); ov.id = "invdlg";
@@ -1890,16 +1893,35 @@ function clientApp() {
         <div class="inv-presets">${S.settings.inviteInstr ? `<button class="chip last" data-act="qilast">↺ Use my last instructions</button>` : ""}${presets().map(p => `<button class="chip" data-act="qipreset" data-v="${esc(p)}">+ ${esc(p)}</button>`).join("")}</div>`
         : `<p class="note">Without an AI key this shares a simple invitation. Add a key in <b>Settings › AI settings</b> to have it written from your instructions.</p>`}
       </div>
-      <button class="primary updgo" data-act="qigo">${ai ? "✦ Write and share" : "Share"}</button>
+      <div id="qiOut" class="qi-out" hidden></div>
+      <button class="primary updgo" data-act="qigo">${ai ? "✦ Write invitation" : "Write invitation"}</button>
       <button class="updlater" data-act="qicancel">Cancel</button></div>`;
     document.body.appendChild(ov);
     ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });   // outside = Cancel
+    if (qiOut[a.id]) renderQiResult();   // written earlier: show it again
+    else if (quickInv.has(a.id)) { const g = ov.querySelector('[data-act="qigo"]'); g.disabled = true; g.textContent = "✦ Writing…"; }
   }
+  const qiOut = {};   // the last invitation written for each post (this session)
   window.onQuickInvite = (id, r) => {
     quickInv.delete(id);
     document.querySelectorAll(`[data-act="quickinvite"][data-id="${id}"]`).forEach(b => b.classList.remove("busy"));
+    qiOut[id] = r;
     if (r.fallback) toast("The AI couldn't write it, so this is the plain invitation");
+    if (qiId === id && $("#invdlg")) renderQiResult();
+    else toast("Your invitation is ready: tap Invite to copy or share it");
   };
+  function renderQiResult() {   // shown in the dialog: nothing is shared until the user taps Copy or Share
+    const r = qiOut[qiId], box = $("#qiOut"), go = $('#invdlg [data-act="qigo"]');
+    if (go) { go.disabled = false; go.textContent = r ? (S.settings.hasKey ? "✦ Write again" : "Write again") : (S.settings.hasKey ? "✦ Write invitation" : "Write invitation"); }
+    const done = $('#invdlg [data-act="qicancel"]'); if (done) done.textContent = r ? "Done" : "Cancel";
+    if (!box) return;
+    if (!r) { box.hidden = true; box.innerHTML = ""; return; }
+    box.hidden = false;
+    box.innerHTML = `<div class="qi-lbl">${r.kind === "ai" ? `✦ AI invitation by ${esc(PN[r.provider] || "AI")}` : "Template — no AI"}</div>
+      <textarea id="qiText" rows="7" aria-label="Your invitation">${esc(r.text)}</textarea>
+      <div class="qi-acts"><button class="sm" data-act="qicopy">Copy</button><button class="sm" data-act="qishare">${SHARE_ICO}Share…</button></div>`;
+    if (box.scrollIntoView) box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
   window.onInvite = (id, r) => {
     inv.busy = false;
     if (r.error) toast("Invite not written: " + r.error); else inv.out[id] = r;
@@ -2719,12 +2741,16 @@ function clientApp() {
       case "qipreset": { const ta = $("#qiInstr"); if (ta) { const cur = ta.value.trim(); ta.value = (cur ? cur.replace(/[.;,]?$/, ". ") : "") + v + "."; } break; }
       case "qilast": { const ta = $("#qiInstr"); if (ta) ta.value = S.settings.inviteInstr || ""; t.remove(); break; }
       case "qicancel": { const d = $("#invdlg"); if (d) d.remove(); break; }
-      case "qigo": {
+      case "qigo": {   // write (or write again); the dialog stays open for Copy and Share
+        const a2 = byId(qiId); if (!a2 || quickInv.has(qiId)) break;
         const who = (($("#qiWho") || {}).value || "").trim(), instr = (($("#qiInstr") || {}).value || "").trim();
-        const d = $("#invdlg"); if (d) d.remove();
-        quickInvite(byId(qiId), who, instr);
+        delete qiOut[qiId]; renderQiResult();
+        t.disabled = true; t.textContent = S.settings.hasKey ? "✦ Writing…" : "Writing…";
+        quickInvite(a2, who, instr);
         break;
       }
+      case "qicopy": { const ta = $("#qiText"); if (ta && ta.value.trim()) send("copy", { text: ta.value }); break; }
+      case "qishare": { const ta = $("#qiText"); if (ta && ta.value.trim()) send("share", { text: ta.value }); break; }
       case "rdclose": rdId = ""; renderReader(); break;
       case "rdorig": send("open", { id: rdId, orig: true }); break;
       case "rdlisten": readerListen(); break;
@@ -3350,6 +3376,12 @@ html[data-font=serif] .ra-p{font-family:var(--serif)}
 .inv .primary.block{margin-top:12px}
 .inv .primary[disabled]{opacity:.6}
 .inv-out{margin-top:14px}
+#invdlg .qi-out{margin:4px 0 8px}
+#invdlg .qi-lbl{font-size:calc(12.5px * var(--ts));font-weight:700;color:var(--signal);margin:0 0 6px}
+#invdlg .qi-out textarea{width:100%;min-height:150px;border:1.5px solid var(--rule);border-radius:12px;background:var(--paper);color:var(--ink);font:16px/1.45 var(--sans);padding:10px 12px;resize:vertical;box-sizing:border-box}
+#invdlg .qi-acts{display:flex;gap:8px;margin-top:8px}
+#invdlg .qi-acts .sm{display:inline-flex;align-items:center;font-weight:700}
+#invdlg .updgo[disabled]{opacity:.65}
 #invdlg .qi-f{margin:4px 0 6px;padding:0;border:0;background:none}
 #invdlg .qi-t{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 #invdlg .updp{max-height:88vh;overflow-y:auto}
