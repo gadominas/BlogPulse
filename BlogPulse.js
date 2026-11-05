@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.20.0';
+const VERSION = '1.21.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -411,7 +411,7 @@ async function loadData() {
   dataLoaded = loadIssues.length === 0;   // anything missing: show what we have, save nothing over it
 }
 const settings = Object.assign(
-  { groupBy: "day", view: "unread", readOnOpen: false, openInReader: true, readerProxy: true, ai: true, aiProvider: "anthropic", lastSession: 0, lastScan: 0,
+  { groupBy: "day", view: "unread", readOnOpen: false, openInReader: true, collapseRead: true, readerProxy: true, ai: true, aiProvider: "anthropic", lastSession: 0, lastScan: 0,
     checkUpdates: true,   // offer new versions from GitHub each time BlogPulse opens
     shareUsage: false, usageAsked: false,  // anonymous usage counts: off until the person agrees
     speechEngine: "device", ttsModel: "gpt-4o-mini-tts", ttsVoice: "coral", ttsInstructions: "",   // read aloud: iPhone voices or OpenAI
@@ -1252,7 +1252,7 @@ function clientState() {
     cfgSchema: CONFIG.map(([title, items]) => ({ title, items })),
     categories: CATS.map(c => ({ id: c[0], label: c[1], color: c[2] })),
     settings: {
-      groupBy: settings.groupBy, view: settings.view, readOnOpen: settings.readOnOpen, openInReader: settings.openInReader !== false, readerProxy: settings.readerProxy !== false, ai: settings.ai, aiProvider: settings.aiProvider, hasKey: !!aiKey(), shareUsage: !!settings.shareUsage, checkUpdates: settings.checkUpdates !== false,
+      groupBy: settings.groupBy, view: settings.view, readOnOpen: settings.readOnOpen, openInReader: settings.openInReader !== false, collapseRead: settings.collapseRead !== false, readerProxy: settings.readerProxy !== false, ai: settings.ai, aiProvider: settings.aiProvider, hasKey: !!aiKey(), shareUsage: !!settings.shareUsage, checkUpdates: settings.checkUpdates !== false,
       voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1, voiceGender: settings.voiceGender || "all",
       speechEngine: settings.speechEngine || "device", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
       ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"),
@@ -1339,7 +1339,7 @@ async function handle(m) {
       return call("onAsk", a.id, res);
     }
     case "set": if (m.k === "shareUsage") { setUsage(m.v === true || m.v === "true" || m.v === "1"); return push(); }
-      if (["groupBy", "view", "readOnOpen", "openInReader", "readerProxy", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "speechEngine", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v; break;
+      if (["groupBy", "view", "readOnOpen", "openInReader", "collapseRead", "readerProxy", "ai", "theme", "density", "font", "textSize", "storyScope", "category", "checkUpdates", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "speechEngine", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v; break;
     case "refresh": return runScan();
     case "usage-consent": setUsage(m.on === "1"); flushUsage(); return push();
     case "usage-test": {
@@ -1576,6 +1576,7 @@ function clientApp() {
       <p class="hint">Changes apply right away and are kept on this iPhone.</p>
       <h3 class="sec">Appearance</h3>${lookHTML()}
       <h3 class="sec">Reading</h3>
+      <div class="srow"><div class="grow"><b>Collapse read posts</b><small class="muted">A read post shrinks to its title. Tap ⌄ to see it all again</small></div><button class="switch ${S.settings.collapseRead !== false ? "on" : ""}" data-act="toggle" data-v="collapseRead" aria-label="Collapse read posts"></button></div>
       <div class="srow"><div class="grow"><b>Open posts in the reader</b><small class="muted">The post's own text in BlogPulse, with Listen and questions. Off: open it in Safari</small></div><button class="switch ${S.settings.openInReader !== false ? "on" : ""}" data-act="toggle" data-v="openInReader" aria-label="Open posts in the reader"></button></div>
       <div class="srow"><div class="grow"><b>Read blocked pages through Jina Reader</b><small class="muted">When a post won't open from your phone (a consent page, pages built by scripts), its public address goes to r.jina.ai, which returns the text</small></div><button class="switch ${S.settings.readerProxy !== false ? "on" : ""}" data-act="toggle" data-v="readerProxy" aria-label="Read blocked pages through Jina Reader"></button></div>
       <div class="srow"><div class="grow"><b>Jina Reader key (optional)</b><small class="muted">${((S.secrets && S.secrets.jina) || {}).last4 ? "Saved, ending …" + esc(((S.secrets && S.secrets.jina) || {}).last4) : "Not set"}. Free at jina.ai; only needed if Jina Reader refuses without one.</small></div>
@@ -2482,6 +2483,10 @@ function clientApp() {
   }
 
   // ---- list ----
+  const openRead = new Set();   // read posts the user opened up again (this session)
+  const isCollapsed = a => a.read && S.settings.collapseRead !== false && !openRead.has(a.id) && !expanded.has(a.id) && !(tts.on && tts.id === a.id);
+  const EXP_ICO = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9.5l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const expBtn = (a, open) => `<button class="expbtn ${open ? "up" : ""}" data-act="${open ? "collapse" : "expand"}" data-id="${a.id}" aria-expanded="${open}" aria-label="${open ? "Collapse" : "Show the whole post"}">${EXP_ICO}</button>`;
   function card(a, sm) {
     const s = sm[a.src] || {};
     const stars = [1, 2, 3].map(n => `<button class="star ${a.rating >= n ? "on" : ""}" data-act="rate" data-id="${a.id}" data-v="${n}" aria-label="Rate ${n} of 3">★</button>`).join("");
@@ -2495,8 +2500,12 @@ function clientApp() {
         <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span>${pinBtn(a)}</div></div>
       <button class="lsbtn mini" data-act="listenarticle" data-id="${a.id}" aria-label="Listen to the full article">${SPK}</button>${tlBtn(a, true)}${invBtn(a, true)}
       <div class="stars mini ${a.rating ? "rated" : ""}">${stars}</div>${inlineTldr(a)}</article>`;
+    if (isCollapsed(a)) return `<article class="${cls} collapsed" id="c-${a.id}">
+      <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span>${pinBtn(a)}${expBtn(a, false)}</div>
+      <h3 data-act="open" data-id="${a.id}">${esc(a.title)}</h3>
+    </article>`;
     return `<article class="${cls}" id="c-${a.id}">
-      <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span>${pinBtn(a)}</div>
+      <div class="meta"><span class="ml"><span class="src">${esc(s.title || "Removed blog")}</span>${ctag}</span><span class="when">${rel(a.pub)}</span>${pinBtn(a)}${a.read && S.settings.collapseRead !== false ? expBtn(a, true) : ""}</div>
       <h3 data-act="open" data-id="${a.id}">${esc(a.title)}</h3>
       ${a.desc ? `<p class="desc" data-act="open" data-id="${a.id}">${a.ai ? `<span class="ai">AI summary</span>` : ""}${esc(a.desc)}</p>` : ""}
       ${inlineTldr(a)}
@@ -2575,9 +2584,13 @@ function clientApp() {
   }
   const PIN_ICO = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11a1 1 0 0 1 1 1v16l-6.5-4.2-6.5 4.2v-16a1 1 0 0 1 1-1z"/></svg>`;
   const pinBtn = a => `<button class="pinbtn ${a.pinned ? "on" : ""}" data-act="pin" data-id="${a.id}" aria-pressed="${!!a.pinned}" aria-label="${a.pinned ? "Remove from Read later" : "Save for later"}">${PIN_ICO}</button>`;
-  function refreshCard(a) {
+  function refreshCard(a, anim) {
     const el = document.getElementById("c-" + a.id);
-    if (el) el.outerHTML = card(a, srcMap());
+    if (el) {
+      el.outerHTML = card(a, srcMap());
+      const n = document.getElementById("c-" + a.id);
+      if (anim && n && n.classList.contains("collapsed")) n.classList.add("shrink");   // just collapsed: a short settle
+    }
     renderChrome();
   }
 
@@ -2764,7 +2777,9 @@ function clientApp() {
         else { secArmed = v; renderCfg(); setTimeout(() => { if (secArmed === v) { secArmed = null; renderCfg(); } }, 3500); }
         break;
       case "rdretry": { const list = rdChat[rdId] || [], m = list[+v]; if (m) { list.splice(+v, 1); rdAsk(m.q); } break; }
-      case "read": a.read = !a.read; keep.add(a.id); send("read", { id, v: a.read }); refreshCard(a); if (tldrId) renderTldr(); break;
+      case "read": a.read = !a.read; keep.add(a.id); send("read", { id, v: a.read }); openRead.delete(a.id); refreshCard(a, true); if (tldrId) renderTldr(); break;
+      case "expand": openRead.add(id); refreshCard(a); break;
+      case "collapse": openRead.delete(id); expanded.delete(id); refreshCard(a, true); break;
       case "listengroup": { send("usage-listen", { kind: "group" }); const items = (groupIdx[v] || []).map(postItem); if (items.length) speak(label(+v)[0], items, undefined, "summaries"); break; }
       case "listenstory": send("usage-listen", { kind: "story" }); if (S.story) speak("Story", storyItems(S.story), undefined, "story"); break;
       case "listentldr": { send("usage-listen", { kind: "summary" }); const d = tl[id]; if (a && d && d !== "loading" && !d.error) speak(srcTitle(a), tldrItems(a, d), undefined, "tldr"); break; }
@@ -2892,7 +2907,7 @@ function clientApp() {
         else { armed = id; renderSheet(); setTimeout(() => { if (armed === id) { armed = null; renderSheet(); } }, 3500); }
         break;
       case "pause": send("pause", { id }); break;
-      case "toggle": S.settings[v] = !S.settings[v]; send("set", { k: v, v: S.settings[v] }); renderCfg(); renderAI(); break;
+      case "toggle": S.settings[v] = !S.settings[v]; send("set", { k: v, v: S.settings[v] }); renderCfg(); renderAI(); if (v === "collapseRead") render(); break;
       case "aiopen": aiOpen = true; renderAI(); send("state", {}); break;   // fresh token counts
       case "cfgopen": cfgOpen = true; renderCfg(); break;
       case "cfgclose": cfgOpen = false; cfgArmed = false; renderCfg(); renderSheet(); break;
@@ -3094,6 +3109,14 @@ section .card:last-child{border-bottom:1px solid var(--rule)}
 .when{flex:none}
 .card h3{font:600 calc(var(--t) * var(--ts))/1.3 var(--display);margin:5px 0;letter-spacing:-.005em;max-width:70ch}
 .card.read h3{font-weight:500;color:var(--muted)}
+.card.collapsed{padding-top:calc(var(--pad) - 4px);padding-bottom:calc(var(--pad) - 6px)}
+.card.collapsed h3{margin:3px 0 2px;font-size:calc((var(--t) - 1px) * var(--ts));display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card.collapsed .meta{opacity:.8}
+.card.shrink{animation:shrink .28s ease-out}
+@keyframes shrink{from{opacity:.4;transform:scaleY(.94);transform-origin:top}to{opacity:1;transform:none}}
+.expbtn{flex:none;width:30px;height:26px;margin:-4px -8px -4px 0;display:grid;place-items:center;color:var(--muted)}
+.expbtn svg{width:18px;height:18px;transition:transform .2s}
+.expbtn.up svg{transform:rotate(180deg)}
 .desc{margin:0;color:var(--ink-2);font-size:calc(var(--d) * var(--ts));line-height:1.55;max-width:68ch;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 body.d-compact .desc{-webkit-line-clamp:2;line-height:1.45}
 .card.read .desc{color:var(--muted)}
@@ -3546,7 +3569,7 @@ textarea.cfgin.wide{resize:vertical}
   .splash *{animation:none!important;opacity:1!important;transform:none!important;stroke-dashoffset:0!important}
   .splash{animation:spOut .3s ease 1.6s forwards!important}
 }
-@media (prefers-reduced-motion: reduce){.rs{transition:none}.pl-prog i{transition:none}.eq i{animation:none;height:60%}#ptr{transition:none}.updp{animation:none}.busy-dot{animation-duration:2.4s}.tlbtn,.tlbtn .chev{transition:none}#top.busy .rf-spin svg,.ln{animation:none}.sheet,#toast,#bar{transition:none}}
+@media (prefers-reduced-motion: reduce){.card.shrink{animation:none}.expbtn svg{transition:none}.rs{transition:none}.pl-prog i{transition:none}.eq i{animation:none;height:60%}#ptr{transition:none}.updp{animation:none}.busy-dot{animation-duration:2.4s}.tlbtn,.tlbtn .chev{transition:none}#top.busy .rf-spin svg,.ln{animation:none}.sheet,#toast,#bar{transition:none}}
 `;
 
 // BlogPulse logo (pulse feed), drawn on its dark tile: header mark and the first-run screen
