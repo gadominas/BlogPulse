@@ -2,6 +2,17 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.21.0 (2026-11-05): Read posts fold away
+
+- 📥 **Read posts fold away**: Once a post is read, it shrinks to its title so unread ones stand out.
+- ⌄ **Open it again**: Tap ⌄ to see a read post in full, ⌃ to fold it back.
+- ⚙️ **Your choice**: Settings › Reading › Collapse read posts turns it off.
+
+**Changes**
+
+- Read posts show only their blog, time and title (Comfortable and Compact layouts); a post being read aloud or with its TL;DR open stays full
+- Settings › Reading › Collapse read posts (on)
+
 ## 1.20.0 (2026-11-04): Invite, then you decide
 
 - ✍️ **See it before it goes**: The invitation appears in the dialog: read it, edit it if you like.
