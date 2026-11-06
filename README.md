@@ -208,7 +208,7 @@ Tap the sliders icon at the top. Changes apply at once and are saved in `setting
 
 ## Updates and what's new
 
-BlogPulse checks this repository for a new version each time it opens. When one is out, a sheet shows its three best features with **Update now** and **Later**; **Later**, or tapping outside the sheet, hides the offer until you open BlogPulse again. Your data and settings are kept. Every release is in [CHANGELOG.md](CHANGELOG.md). You can also check any time in **Settings › Updates**, or run the installer again.
+BlogPulse checks this repository for a new version each time it opens. When one is out, a sheet shows its three best features with **Update now** and **Later**; **Later**, or tapping outside the sheet, hides the offer for two days. Your data and settings are kept. Every release is in [CHANGELOG.md](CHANGELOG.md). You can also check any time in **Settings › Updates**, or run the installer again.
 
 ## Privacy and security
 

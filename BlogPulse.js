@@ -20,13 +20,14 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.21.1';
+const VERSION = '1.22.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
-// No snooze: "Later" only hides the offer until BlogPulse is opened again.
-// Up to 1.4.0 "Later" (or a tap outside the sheet) hid it for 2 days under this Keychain key; it's cleared at start.
-const KC_UPDATE_SNOOZE = 'blogpulse-update-snooze';
+const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;   // "Later" = 2 days
+const KC_UPDATE_SNOOZE = 'blogpulse-update-snooze';   // Keychain key, unique per app
+// In a native shell (BuildIt) new versions come from the App Store or TestFlight, never from GitHub (Step 8).
+const NATIVE_SHELL = (() => { try { return config.runsInNativeShell === true; } catch (e) { return false; } })();
 
 // ── Anonymous usage counts (opt-in), sent to PostHog (app-blueprints · usage-analytics) ──
 // Nothing is sent until KEY is filled in AND the person agrees. Each event carries a random install ID
@@ -59,14 +60,14 @@ async function askSecret(id) {
 // inventory tools read it without running the script, and Settings › Built with shows it.
 const BLUEPRINTS_REPO = 'https://github.com/gadominas/app-blueprints';
 const BLUEPRINTS = [
-  { id: 'stability-patterns', name: 'Stability patterns', version: '1.0.0', since: '1.19.4' },
-  { id: 'in-app-updates', name: 'In-app updates', version: '1.0.1', since: '1.19.4' },
+  { id: 'stability-patterns', name: 'Stability patterns', version: '1.0.1', since: '1.22.0' },
+  { id: 'in-app-updates', name: 'In-app updates', version: '1.1.0', since: '1.22.0' },
   { id: 'settings', name: 'Settings', version: '1.1.2', since: '1.19.4' },
-  { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.0.0' },
-  { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.6.0' },
-  { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.8.0' },
+  { id: 'ai-configuration', name: 'AI configuration', version: '1.0.1', since: '1.22.0' },
+  { id: 'launch-screen', name: 'Launch screen', version: '1.0.1', since: '1.22.0' },
+  { id: 'widgets', name: 'Widgets', version: '1.1.1', since: '1.22.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.12.0' },
-  { id: 'audio-playback', name: 'Sound in silent mode', version: '1.0.0', since: '1.19.3' },
+  { id: 'audio-playback', name: 'Sound in silent mode', version: '1.0.1', since: '1.22.0' },
   { id: 'read-aloud', name: 'Read aloud', version: '1.2.3', since: '1.19.3' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.14.0' },
 ];
@@ -412,7 +413,7 @@ async function loadData() {
 }
 const settings = Object.assign(
   { groupBy: "day", view: "unread", readOnOpen: false, openInReader: true, collapseRead: true, readerProxy: true, ai: true, aiProvider: "anthropic", lastSession: 0, lastScan: 0,
-    checkUpdates: true,   // offer new versions from GitHub each time BlogPulse opens
+    checkUpdates: true,   // offer new versions from GitHub (asks again 2 days after "Later")
     shareUsage: false, usageAsked: false,  // anonymous usage counts: off until the person agrees
     speechEngine: "device", ttsModel: "gpt-4o-mini-tts", ttsVoice: "coral", ttsInstructions: "",   // read aloud: iPhone voices or OpenAI
     theme: "auto", density: "comfortable", font: "sans", textSize: 1, storyScope: "new" },
@@ -1172,11 +1173,16 @@ function cmpVer(a, b) {
   }
   return 0;
 }
+function updateSnoozed() {
+  try { return Keychain.contains(KC_UPDATE_SNOOZE) && Date.now() < +Keychain.get(KC_UPDATE_SNOOZE); } catch (e) { return false; }
+}
+function snoozeUpdate() { try { Keychain.set(KC_UPDATE_SNOOZE, String(Date.now() + UPDATE_SNOOZE_MS)); } catch (e) {} }
 function clearUpdateSnooze() { try { if (Keychain.contains(KC_UPDATE_SNOOZE)) Keychain.remove(KC_UPDATE_SNOOZE); } catch (e) {} }
-clearUpdateSnooze();   // a two-day "Later" left by an older version must not block offers
 
+// force: Settings › Check for updates now, which asks even while "Later" is waiting or offers are off
 async function checkForUpdate(force = false) {
-  if (!force && settings.checkUpdates === false) return null;
+  if (NATIVE_SHELL) return null;   // Step 8: updates come through the App Store
+  if (!force && (settings.checkUpdates === false || updateSnoozed())) return null;
   try {
     const req = new Request(`${REPO_RAW}releases.json?t=${Date.now()}`);
     req.timeoutInterval = 10;
@@ -1202,6 +1208,7 @@ async function checkForUpdate(force = false) {
 }
 
 async function applyUpdate(info) {
+  if (NATIVE_SHELL) throw new Error('This app is updated through the App Store.');   // Step 8: never download code
   const req = new Request(`${REPO_RAW}${encodeURI((info && info.script) || SCRIPT_FILE)}?t=${Date.now()}`);
   req.timeoutInterval = 30;
   const code = await req.loadString();
@@ -1259,7 +1266,7 @@ function clientState() {
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize, storyScope: settings.storyScope, category: settings.category || "all", inviteInstr: settings.inviteInstr || "",
     },
     story: (() => { const st = stories[storyKey()]; return st ? Object.assign({}, st, { stale: st.sig !== storySig(st.scope, st.cat) }) : null; })(),
-    picksReady: pk.ready, rated: pk.n, lastScan: settings.lastScan, palettes: PALETTES, version: VERSION,
+    picksReady: pk.ready, rated: pk.n, lastScan: settings.lastScan, palettes: PALETTES, version: VERSION, nativeShell: NATIVE_SHELL,
     secrets: Object.fromEntries(Object.keys(SECRETS).map(id => [id, { name: SECRETS[id].name, last4: (secretFor(id) || "").slice(-4) || null }])),
     usageAvailable: usageAvailable(), usageStatus: usageStatus(), usageAsk: usageAvailable() && !settings.usageAsked && !settings.shareUsage,
     ttsModels: settings.ttsModels || null,
@@ -1413,7 +1420,7 @@ async function handle(m) {
       try { return call("__done", m.req, true, await aiSpeech(m.text)); }
       catch (e) { return call("__done", m.req, false, String(e.message || e)); }
     case "speak": if (m.text) Speech.speak(String(m.text).slice(0, 8000)); return;   // fallback when the page can't speak
-    case "update-later": pendingUpdate = null; return;   // asked again next time BlogPulse opens
+    case "update-later": pendingUpdate = null; snoozeUpdate(); return;   // asked again in 2 days
     case "update-now": {
       let ok = false, msg = "";
       try { msg = await applyUpdate(pendingUpdate); ok = true; pendingUpdate = null; track("app_updated", { from: VERSION, to: (msg.match(/[0-9]+\.[0-9]+\.[0-9]+/) || [""])[0] }); flushUsage(); }
@@ -1431,7 +1438,7 @@ async function handle(m) {
     case "update-check": {
       const u = await checkForUpdate(true);
       await call("__done", m.req, true, u ? `Version ${u.latest} is available` : `You're on the latest version (${VERSION})`);
-      if (u) { pendingUpdate = u; offerUpdate(); }
+      if (u) { clearUpdateSnooze(); pendingUpdate = u; offerUpdate(); }
       return;
     }
     case "aikey": {
@@ -1588,8 +1595,10 @@ function clientApp() {
       <div class="srow"><div class="grow"><b>Share anonymous usage</b><small class="muted">Counts like app opens, posts read and AI summaries made, with a random install ID. Never your blogs, posts or anything you read. Off removes the ID.</small></div><button class="switch ${S.settings.shareUsage ? "on" : ""}" data-act="toggle" data-v="shareUsage" aria-label="Share anonymous usage"></button></div>
       <div class="srow"><div class="grow"><b>Test the connection</b><small id="usagemsg" class="muted" aria-live="polite">${esc(S.usageStatus || "Sends one test event now and shows PostHog’s answer.")}</small></div><button class="sm" data-act="usage-test">Send test</button></div>` : ""}
       <h3 class="sec">Updates</h3>
-      <div class="srow"><div class="grow"><b>Offer new versions</b><small class="muted">You have BlogPulse ${esc(S.version)}. Checked each time BlogPulse opens.</small></div><button class="switch ${S.settings.checkUpdates ? "on" : ""}" data-act="toggle" data-v="checkUpdates" aria-label="Offer new versions"></button></div>
-      <div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>
+      ${S.nativeShell
+        ? `<div class="srow"><div class="grow"><b>Updates</b><small class="muted">You have BlogPulse ${esc(S.version)}. New versions come through the App Store (or TestFlight).</small></div></div>`
+        : `<div class="srow"><div class="grow"><b>Offer new versions</b><small class="muted">You have BlogPulse ${esc(S.version)}. “Later” waits two days.</small></div><button class="switch ${S.settings.checkUpdates ? "on" : ""}" data-act="toggle" data-v="checkUpdates" aria-label="Offer new versions"></button></div>
+      <div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>`}
       <div class="srow"><div class="grow"><b>Start-up log</b><small class="muted">What happened the last times BlogPulse opened</small></div><button class="sm" data-act="startlog">Show</button></div>
       <pre id="startlog" class="startlog" hidden></pre>
       <h3 class="sec">AI</h3>
@@ -1808,7 +1817,8 @@ function clientApp() {
     const m = q.shift();
     if (!m) { flushing = false; return; }
     flushing = true;
-    location.href = "blogpulse://a?d=" + encodeURIComponent(JSON.stringify(m));
+    const url = "blogpulse://a?d=" + encodeURIComponent(JSON.stringify(m));
+    if (window.__hostBridge) window.__hostBridge(url); else window.location.href = url;   // portable-bridge recipe
     setTimeout(flush, 80);
   }
 
@@ -1841,7 +1851,7 @@ function clientApp() {
       '<div class="updl">' + cards + "</div>" +
       '<div class="updmsg" aria-live="polite"></div>' +
       '<button class="primary updgo" data-act="upd-now">Update now</button>' +
-      '<button class="updlater" data-act="upd-later">Later</button></div>';
+      '<button class="updlater" data-act="upd-later">Later, remind me in 2 days</button></div>';
     document.body.appendChild(ov);
     ov.addEventListener("click", function (e) { if (e.target === ov) updLater(); });   // outside = Later
   };

@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const { JSDOM } = require("jsdom");
 const SRC = fs.readFileSync(process.env.BLOGPULSE_SCRIPT || path.join(__dirname, "..", "BlogPulse.js"), "utf8");
-const BRIDGE_HOOK = 'location.href = "blogpulse://a?d=" + encodeURIComponent(JSON.stringify(m));';
+const BRIDGE_HOOK = 'window.__hostBridge(url)';   // portable-bridge recipe: the page hands bridge URLs to __hostBridge when it exists
 
 const H = 3600e3, DAY = 24 * H;
 // A Google News article id of the newer kind: the publisher's address isn't inside, it has to be asked for
@@ -209,13 +209,13 @@ function makeEnv(opts = {}) {
     constructor() { wvRef = this; log.webviews = (log.webviews || 0) + 1; }
     async loadHTML(html) {
       if (!html.includes(BRIDGE_HOOK)) { if (/clientApp|blogpulse:\/\//.test(html)) throw new Error("bridge hook not found"); log.blankFirst = true; dom = new JSDOM(html); return; }
-      html = html.replace(BRIDGE_HOOK, 'window.__nav("blogpulse://a?d=" + encodeURIComponent(JSON.stringify(m)));');
       dom = new JSDOM(html, { runScripts: "dangerously", pretendToBeVisual: true, url: "https://local.test/",
         beforeParse(w) {
           w.matchMedia = () => ({ matches: false, addEventListener() {}, addListener() {} });
           w.scrollTo = () => {};
           w.HTMLElement.prototype.scrollIntoView = function () { (log.scrolledTo = log.scrolledTo || []).push(this.className || this.id); };
           w.__nav = u => { Promise.resolve(wvRef.shouldAllowRequest({ url: u })).catch(e => { log.jsErrors = (log.jsErrors || []).concat("bridge: " + (e.stack || e)); }); };
+          w.__hostBridge = w.__nav;   // as a native shell does: bridge URLs go straight to shouldAllowRequest
           w.addEventListener("error", e => { log.jsErrors = (log.jsErrors || []).concat(String(e.error && e.error.stack || e.message)); });
           // iOS media session (silent-switch handling)
           w.navigator.audioSession = { type: "auto" };

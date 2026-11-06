@@ -1,4 +1,4 @@
-// Updates: a newer release offered at start (what's new), Later (offered again at the next launch), Update now (written where the script
+// Updates: a newer release offered at start (what's new), Later (not offered again for two days), Update now (written where the script
 // lives, checked first), a bad download refused, Check for updates in Settings when up to date
 const { seeded, run, page, wait, until, finish } = require("../harness");
 const NEW = { releases: [{ version: "99.0.0", date: "2026-11-06", title: "A big one", highlights: [{ icon: "⚡", title: "Faster checks", text: "Feeds load in parallel." }, { icon: "🧩", title: "A new widget", text: "Story on the Home Screen." }] }] };
