@@ -1,0 +1,11 @@
+{
+  "name": "blogpulse-tests",
+  "private": true,
+  "description": "Runs the real BlogPulse.js in Node with Scriptable's APIs stubbed: behaviour tests (screenshots come from docs/site/scenario.js)",
+  "scripts": {
+    "test": "node run.js"
+  },
+  "dependencies": {
+    "jsdom": "^24.1.3"
+  }
+}

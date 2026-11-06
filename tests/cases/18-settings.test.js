@@ -1,0 +1,50 @@
+// Settings: Appearance (colours, layout, text size, font), Reading switches, Listening (voice, speed, Test), Values (step,
+// reset one, reset all), Built with, the version; all kept after closing
+const { seeded, run, page, wait, until, finish } = require("../harness");
+(async () => {
+  const errors = []; process.on("unhandledRejection", e => errors.push("UNHANDLED " + (e.stack || e)));
+  let { E, p } = await seeded(); p.catch(e => errors.push("SCRIPT " + e.stack));
+  await until(() => page(E).$$(".card").length, 5000);
+  let P = page(E);
+  P.tap('[data-act="cfgopen"]'); await wait(40);
+  const heads = P.$$("#cfg h3.sec, #cfgsheet h3.sec, #cfg h3, #cfgsheet h3").map(h => h.textContent.trim()).filter((x, i, a) => a.indexOf(x) === i);
+  console.log("A sections:", heads.join(" · "));
+  const look = (k, v) => P.tap(`[data-act="look"][data-k="${k}"][data-v="${v}"]`);
+  look("theme", P.$$('[data-act="look"][data-k="theme"]').map(b => b.dataset.v).find(v => v !== "auto" && v !== P.d.documentElement.dataset.theme)); await wait(20);
+  look("density", "tiny"); look("textSize", "1.12"); look("font", "serif"); await wait(40);
+  const root = P.d.documentElement;
+  console.log("B appearance: theme", root.dataset.theme, "| layout:", P.d.body.className.match(/d-\w+/)[0], "| text size:", root.style.getPropertyValue("--ts"), "| font:", root.dataset.font);
+  const sw = k => P.$(`[data-act="toggle"][data-v="${k}"]`);
+  const on = k => sw(k) && sw(k).classList.contains("on");
+  console.log("C Reading switches:", ["openInReader", "readOnOpen", "collapseRead", "readerProxy"].map(k => k + (on(k) ? " on" : " off")).join(", "));
+  P.tap(null, sw("readOnOpen")); await wait(30);
+  console.log("  Mark read when opened:", on("readOnOpen"));
+  P.tap('[data-act="voiceset"][data-k="voiceRate"][data-v="1.15"], [data-act="voiceset"][data-k="voiceRate"]:last-child'); await wait(30);
+  const voices = P.$$(".voicesel option, select.voicesel option").map(o => o.textContent).slice(0, 4);
+  console.log("D Listening: voices", voices.join(", "), "| speed:", (P.$('[data-act="voiceset"][data-k="voiceRate"].on') || {}).textContent);
+  P.tap('[data-act="voicetest"]'); await until(() => E.log.spoken.length, 1000);
+  console.log("  Test the voice:", E.log.spoken.slice(-1)[0].slice(0, 40));
+  P.tap('[data-act="plstop"]'); await wait(20);
+  const step = P.$('[data-act="cfgstep"][data-k="pageSize"][data-v="1"]');
+  P.tap(null, step); await wait(40);
+  console.log("E Values › Posts per page +1:", P.text(`[data-k="pageSize"]`).slice(0, 30) || "", "| reset button:", !!P.$('[data-act="cfgreset"][data-k="pageSize"]'));
+  P.tap('[data-act="cfgreset"][data-k="pageSize"]'); await wait(40);
+  console.log("  reset:", !P.$('[data-act="cfgreset"][data-k="pageSize"]'));
+  const blue = P.$$('[data-act="openurl"]');
+  console.log("F Built with:", blue.length, "blueprints | version shown:", /1\.\d+\.\d+/.test(P.text("#cfg") || P.text("#cfgsheet")));
+  P.tap(null, blue[0]); await until(() => E.log.opened.length, 1500);
+  console.log("  opens:", E.log.opened.slice(-1)[0]);
+  P.tap('[data-act="cfgclose"]'); await wait(20);
+  console.log("G tiny layout cards:", P.$$(".card.tiny").length);
+  E.finish(); await p;
+  const st = JSON.parse(E.files["/icloud/Documents/BlogPulse/settings.json"]);
+  console.log("H saved:", ["theme", "density", "textSize", "font", "readOnOpen", "voiceRate"].map(k => k + "=" + st[k]).join(" "));
+  // I: reopened with the same look, and Mark read when opened now marks a post read when it opens
+  ({ E, p } = await run({ files: E.files, kc: E.kc, speech: true })); p.catch(e => errors.push("SCRIPT " + e.stack));
+  await until(() => page(E).w.__booted, 4000); P = page(E);
+  console.log("I reopened: layout", P.d.body.className.match(/d-\w+/)[0], "| font:", P.d.documentElement.dataset.font);
+  const a = P.idOf("Scaling Java"); P.tap(`#c-${a} .tmain, #c-${a} h3`); await until(() => P.$$("#reader .rd-p").length, 3000); P.tap('[data-act="rdclose"]'); await wait(200);
+  console.log("  opened post marked read:", P.card(a).classList.contains("read"));
+  E.finish(); await p;
+  finish(E, errors); process.exit(0);
+})().catch(e => { console.log("CRASH", e.stack); process.exit(1); });

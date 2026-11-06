@@ -298,12 +298,11 @@ module.exports = {
       run: async (h) => { await h.tap('.cat-pill[data-v="ai"]'); await h.wait(600); } },
     { id: '05-invite', label: 'Invite someone to read', caption: 'A short note in your words, written by AI from your instructions.',
       run: async (h) => {
-        await h.tap(`#c-${post('ledger').id} .tlbtn`); await h.wait(1500);
-        await h.tap(`#c-${post('ledger').id} [data-act="tldrpanel"]`); await h.wait(600);
-        await h.type('#invWho', 'my platform team');
-        await h.type('#invInstr', 'Casual, two sentences, link it to our reconciliation backlog');
-        await h.tap('[data-act="invgo"]'); await h.wait(1500);
-        await h.eval(() => { const s = document.querySelector('#tldr'); const r = document.querySelector('.inv-actions').getBoundingClientRect(); s.scrollTop += r.bottom - (innerHeight - 8); });
+        await h.tap(`#c-${post('ledger').id} [data-act="quickinvite"]`); await h.wait(600);
+        await h.type('#qiWho', 'my platform team');
+        await h.type('#qiInstr', 'Casual, two sentences, link it to our reconciliation backlog');
+        await h.tap('[data-act="qigo"]'); await h.wait(1500);
+        await h.eval(() => { const t = document.querySelector('#qiText'); if (t && t.scrollIntoView) t.scrollIntoView({ block: 'center' }); });
         await h.wait(400);
       } },
     { id: '06-read-later', label: 'Read it later', caption: 'Bookmark a post, tap Done when you have read it.',

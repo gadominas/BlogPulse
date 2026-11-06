@@ -240,6 +240,10 @@ BlogPulse follows five shared blueprints: in-app updates, settings, AI configura
 | An update says GitHub is serving the old version | Wait a few minutes after a release and tap **Try again** |
 | BlogPulse won't open, or stays on "Loading your posts…" | Swipe Scriptable away to quit it, open it again, and run **Install BlogPulse** once. If it still sticks, the screen shows what it was waiting for, and **Settings › Updates › Start-up log** shows each step of the last openings |
 
+## Tests
+
+`tests/` runs the real `BlogPulse.js` in Node with Scriptable's APIs replaced by stand-ins and taps through 23 scenarios, from first start to the widget, with fixed answers instead of the network and the AI: `cd tests && npm install && node run.js`. See [docs/TESTING.md](docs/TESTING.md).
+
 ## Built with
 
 - **[Scriptable](https://scriptable.app)** by Simon Støvring: one JavaScript file, a WebView for the interface.

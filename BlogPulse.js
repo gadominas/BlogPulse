@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.21.0';
+const VERSION = '1.21.1';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -2034,7 +2034,7 @@ function clientApp() {
   }
   function aiPlayPart() {
     const my = ++tts.token, part = tts.parts[tts.i];
-    if (!part) return stopSpeaking();
+    if (!part) return endOfParts();
     tts.loading = !part.audio; renderPlayer();
     aiFetch(part).then(b64 => {
       if (my !== tts.token) return;
@@ -2062,6 +2062,13 @@ function clientApp() {
     });
   }
   const playSoon = () => { clearTimeout(tts.timer); tts.timer = setTimeout(playPart, 60); };   // iOS needs a beat after cancel()
+  // Article and the reader's Listen say "Loading the article." while the text loads. If that ends first (a slow page,
+  // a consent wall, Jina Reader), the player waits for the text instead of stopping; the text or an error ends the wait.
+  function speakLoading(a) { speak(srcTitle(a), [{ id: a.id, title: a.title, paras: [{ text: "Loading the article." }] }], undefined, "article"); tts.waitText = true; }
+  function endOfParts() {
+    if (tts.waitText) { tts.loading = true; renderPlayer(); return; }   // still loading the article: stay on, "preparing…"
+    stopSpeaking();
+  }
   function speak(label, items, engine, kind) {
     const ai = engine ? engine === "ai" : aiTTS();
     if (!ai && (!SYN || !voices.length)) {   // no Web Speech: hand the text to Scriptable's system voice
@@ -2072,7 +2079,7 @@ function clientApp() {
     if (ai) unlockAudio();   // has to happen inside the tap, before any waiting
     audioOn(ai ? "media" : "speech");   // plays with the Ring/Silent switch on, too (audio-playback)
     tts.engine = ai ? "ai" : "device";
-    tts.items = items; tts.label = label; tts.i = 0; tts.paused = false; tts.on = true;
+    tts.items = items; tts.label = label; tts.i = 0; tts.paused = false; tts.on = true; tts.waitText = false;
     tts.kind = kind || ""; tts.id = (items[0] && items[0].id) || ""; tts.nowSeg = -1;
     const plan = buildPlan(items, ai);
     tts.parts = plan.parts; tts.segs = plan.segs; tts.total = plan.total; tts.pos = 0;
@@ -2083,7 +2090,7 @@ function clientApp() {
   function playPart() {
     if (tts.engine === "ai") return aiPlayPart();
     const my = ++tts.token, part = tts.parts[tts.i];
-    if (!part) return stopSpeaking();
+    if (!part) return endOfParts();
     const u = new SpeechSynthesisUtterance(part.t), v = currentVoice();
     if (v) { u.voice = v; u.lang = v.lang; }
     u.rate = Number(S.settings.voiceRate) || 1; u.pitch = Number(S.settings.voicePitch) || 1;
@@ -2093,7 +2100,7 @@ function clientApp() {
     tts.pos = 0; SYN.speak(u); renderPlayer();
   }
   function stopSpeaking(quiet) {
-    tts.token++; tts.on = false; tts.paused = false; tts.loading = false; clearTimeout(tts.timer);
+    tts.token++; tts.on = false; tts.paused = false; tts.loading = false; tts.waitText = false; clearTimeout(tts.timer);
     au.onended = null; try { au.pause(); } catch (e) {}
     if (SYN) SYN.cancel();
     document.querySelectorAll(".rs-now,.rs-done").forEach(el => el.classList.remove("rs-now", "rs-done"));
@@ -2335,7 +2342,7 @@ function clientApp() {
     if (readerParas()) return readerSpeak();
     const a = byId(rdId);   // still loading: start speaking inside the tap, the article follows (iOS needs the tap)
     rdListenSoon = rdId;
-    speak(srcTitle(a), [{ id: a.id, title: a.title, paras: [{ text: "Loading the article." }] }], undefined, "article");
+    speakLoading(a);
   }
   function mdLite(t) {   // AI answers: paragraphs, "- " bullets and **bold**, everything else escaped
     const inl = x => esc(x).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
@@ -2784,7 +2791,7 @@ function clientApp() {
       case "listenstory": send("usage-listen", { kind: "story" }); if (S.story) speak("Story", storyItems(S.story), undefined, "story"); break;
       case "listentldr": { send("usage-listen", { kind: "summary" }); const d = tl[id]; if (a && d && d !== "loading" && !d.error) speak(srcTitle(a), tldrItems(a, d), undefined, "tldr"); break; }
       case "listenarticle": send("usage-listen", { kind: "article" });   // speak right away (iOS only lets speech start from a tap), then the article follows
-        if (a) { speak(srcTitle(a), [{ id, title: a.title, paras: [{ text: "Loading the article." }] }], undefined, "article"); send("articletext", { id }); } break;
+        if (a) { speakLoading(a); send("articletext", { id }); } break;
       case "plpause": togglePause(); break;
       case "plnext": skipItem(); break;
       case "plstop": stopSpeaking(); break;
@@ -2847,7 +2854,7 @@ function clientApp() {
       case "tldrclose": tldrId = null; renderTldr(); if (view === "story") render(); break;
       case "rate": {
         const n = +v; a.rating = a.rating === n ? 0 : n;
-        if (a.rating) a.read = true;
+        if (a.rating) { a.read = true; openRead.add(a.id); }   // rating marks it read, but keep the stars in reach: don't fold it under your finger
         keep.add(a.id); send("rate", { id, v: a.rating }); refreshCard(a); if (tldrId) renderTldr(); break;
       }
       case "view":

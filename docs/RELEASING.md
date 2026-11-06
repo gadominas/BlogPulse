@@ -6,8 +6,9 @@
 
 1. **Bump the version** in `BlogPulse.js`: `const VERSION = '1.1.0';`. Use [semantic versioning](https://semver.org): a new feature bumps the middle number, a fix-only release the last.
 2. **Add a release at the top of `releases.json`**, with the same version.
-3. **Regenerate the changelog**: `node tools/changelog.js`.
-4. **Commit everything to `main`**: the script first, then `releases.json` and `CHANGELOG.md`. In that order the update offer can never appear before the new script is there to download.
+3. **Run the tests**: `cd tests && npm install && node run.js`. Release only with every scenario passing (see [TESTING.md](TESTING.md)).
+4. **Regenerate the changelog**: `node tools/changelog.js`.
+5. **Commit everything to `main`**: the script first, then `releases.json` and `CHANGELOG.md`. In that order the update offer can never appear before the new script is there to download.
 
 Users see the update the next time they open BlogPulse. GitHub can take a few minutes to serve new files.
 
