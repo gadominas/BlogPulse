@@ -2,6 +2,21 @@
 
 All notable changes to BlogPulse. Generated from `releases.json`; edit that file, not this one.
 
+## 1.21.1 (2026-11-06): Two fixes
+
+- ★ **Stars stay put**: Rating a post no longer folds it away under your finger.
+- 🔊 **Articles always play**: Listen waits for a slow article instead of stopping.
+
+**Changes**
+
+- Automated tests: 23 scenarios run the real script in Node (docs/TESTING.md)
+- The README's Invite screenshot shows the current Invite dialog
+
+**Fixes**
+
+- Rating a post marked it read and folded it to its title, hiding the stars you had just tapped
+- Article and the reader's Listen stopped if “Loading the article.” finished before the article arrived; the player now waits for it
+
 ## 1.21.0 (2026-11-05): Read posts fold away
 
 - 📥 **Read posts fold away**: Once a post is read, it shrinks to its title so unread ones stand out.

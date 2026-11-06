@@ -4,6 +4,31 @@
   "script": "BlogPulse.js",
   "releases": [
     {
+      "version": "1.21.1",
+      "date": "2026-11-06",
+      "title": "Two fixes",
+      "highlights": [
+        {
+          "icon": "★",
+          "title": "Stars stay put",
+          "text": "Rating a post no longer folds it away under your finger."
+        },
+        {
+          "icon": "🔊",
+          "title": "Articles always play",
+          "text": "Listen waits for a slow article instead of stopping."
+        }
+      ],
+      "changes": [
+        "Automated tests: 23 scenarios run the real script in Node (docs/TESTING.md)",
+        "The README's Invite screenshot shows the current Invite dialog"
+      ],
+      "fixes": [
+        "Rating a post marked it read and folded it to its title, hiding the stars you had just tapped",
+        "Article and the reader's Listen stopped if “Loading the article.” finished before the article arrived; the player now waits for it"
+      ]
+    },
+    {
       "version": "1.21.0",
       "date": "2026-11-05",
       "title": "Read posts fold away",
