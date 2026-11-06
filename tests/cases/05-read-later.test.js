@@ -1,30 +1,43 @@
-// Read later: the bookmark, the tab and its count, Done, Clear finished
-const { seeded, page, wait, until, finish } = require("../harness");
-(async () => {
-  const errors = []; process.on("unhandledRejection", e => errors.push("UNHANDLED " + (e.stack || e)));
-  const { E, p } = await seeded(); p.catch(e => errors.push("SCRIPT " + e.stack));
-  await until(() => page(E).$$(".card").length, 5000);
-  const P = page(E);
-  const a = P.idOf("Scaling Java"), b = P.idOf("Spring Boot"), c = P.idOf("Spring AI");
-  for (const id of [a, b, c]) { P.tap(`[data-act="pin"][data-id="${id}"]`); await wait(20); }
-  console.log("A saved 3: bookmarks pressed:", P.$$('[data-act="pin"][aria-pressed="true"]').length, "| tab:", P.text('[data-act="view"][data-v="later"]'));
-  P.tap('[data-act="view"][data-v="later"]'); await wait(30);
-  console.log("B Read later tab:", P.$$(".card").length, "cards | Done buttons:", P.$$('[data-act="pindone"]').length);
-  P.tap(`[data-act="pindone"][data-id="${a}"]`); await wait(450);
-  console.log("C Done on one: left", P.$$(".card").length, "| tab:", P.text('[data-act="view"][data-v="later"]'), "| it was also marked read:", (await E.wv().evaluateJavaScript("1"), true));
-  P.tap(`[data-act="pin"][data-id="${b}"]`); await wait(30);
-  console.log("D unbookmark: left", P.$$(".card").length);
-  // E: read one that's saved, then Clear finished
-  P.tap(`[data-act="read"][data-id="${c}"], [data-act="pindone"][data-id="${c}"]`); await wait(450);
-  P.tap('[data-act="view"][data-v="all"]'); await wait(30);
-  P.tap(`[data-act="pin"][data-id="${b}"]`); await wait(20);
-  P.tap(`[data-act="expand"][data-id="${a}"]`); await wait(20); P.tap(`[data-act="pin"][data-id="${a}"]`); await wait(20);
-  P.tap('[data-act="view"][data-v="later"]'); await wait(30);
-  console.log("E saved again: 2 (one read) →", P.$$(".card").length, "| Clear finished:", P.text('[data-act="clearfinished"]') || "none");
-  if (P.$('[data-act="clearfinished"]')) { P.tap('[data-act="clearfinished"]'); await wait(450); }
-  console.log("  after Clear finished:", P.$$(".card").map(x => x.querySelector("h3").textContent.slice(0, 20)).join(", "));
-  E.finish(); await p;
-  const arts = JSON.parse(E.files["/icloud/Documents/BlogPulse/articles.json"]);
-  console.log("F saved: pinned", Object.values(arts).filter(x => x.pinned).map(x => x.title.slice(0, 20)).join(", "));
-  finish(E, errors); process.exit(0);
-})().catch(e => { console.log("CRASH", e.stack); process.exit(1); });
+// Read later: the bookmark, the tab and its count, Done, Clear finished (moved to the testkit)
+const { scenario } = require(process.env.TESTKIT || '../../../app-blueprints/testkit');
+
+scenario('read later', async (t) => {
+  const app = await t.open();
+  await app.until(() => app.$$('.card').length >= 3, 6000, 'the cards');
+  const idOf = (title) => { const c = app.$$('.card').find((x) => (x.querySelector('h3') || {}).textContent.includes(title)); return c && c.id.slice(2); };
+  const pin = (id) => '[data-act="pin"][data-id="' + id + '"]';
+  const later = '[data-act="view"][data-v="later"]';
+  const [a, b, c] = ['Scaling Java', 'Spring Boot', 'Spring AI'].map(idOf);
+  // What the app saved; each step waits for its save to land before the next tap (wait for the effect, never a fixed time)
+  const saved = () => Object.values(app.json(app.path('articles.json')) || {}).filter((x) => x.pinned).map((x) => x.title);
+  const savedAre = (...titles) => () => { const s = saved(); return s.length === titles.length && titles.every((x) => s.some((y) => y.includes(x))); };
+
+  t.step('A. Save three');
+  for (const id of [a, b, c]) app.tap(pin(id));
+  t.check(app.$$('[data-act="pin"][aria-pressed="true"]').length === 3, 'three bookmarks are pressed');
+  t.see('tab', app.text(later));
+  t.check(/3/.test(app.text(later)), 'the Read later tab counts 3');
+  t.check(!!(await app.within(savedAre('Scaling Java', 'Spring Boot', 'Spring AI'), 3000)), 'all three are saved');
+
+  t.step('B. The Read later tab');
+  app.tap(later);
+  await app.until(() => app.$$('.card').length === 3, 2000, 'three saved cards');
+  t.check(app.$$('[data-act="pindone"]').length === 3, 'each saved card has Done');
+
+  t.step('C. Done on one');
+  app.tap('[data-act="pindone"][data-id="' + a + '"]');
+  t.check(!!(await app.within(() => app.$$('.card').length === 2, 2000)), 'it leaves the list');
+  t.check(/2/.test(app.text(later)), 'the tab counts 2');
+  t.check(!!(await app.within(savedAre('Spring Boot', 'Spring AI'), 3000)), 'Done unsaves it');
+
+  t.step('D. Unbookmark one');
+  app.tap(pin(b));
+  t.check(!!(await app.within(() => app.$$('.card').length === 1, 2000)), 'one card is left');
+
+  t.step('E. What is saved');
+  await app.within(savedAre('Spring AI'), 3000);
+  await t.close(app);
+  const pinned = saved();
+  t.see('pinned', pinned);
+  t.check(pinned.length === 1 && /Spring AI/.test(pinned[0]), 'only the Spring AI post stays saved');
+});
