@@ -20,7 +20,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.22.0';
+const VERSION = '1.23.0';
 const APP_ID = 'blogpulse';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/BlogPulse/main/';
 const SCRIPT_FILE = 'BlogPulse.js';   // the script's file name in the repository
@@ -56,21 +56,34 @@ async function askSecret(id) {
 }
 
 // ───────── Blueprints ─────────
-// Shared blueprints this app was built with (github.com/gadominas/app-blueprints). One line per blueprint, in this exact shape:
+// Shared blueprints this app was built with. One line per blueprint, in this exact shape:
 // inventory tools read it without running the script, and Settings › Built with shows it.
-const BLUEPRINTS_REPO = 'https://github.com/gadominas/app-blueprints';
 const BLUEPRINTS = [
-  { id: 'stability-patterns', name: 'Stability patterns', version: '1.0.1', since: '1.22.0' },
-  { id: 'in-app-updates', name: 'In-app updates', version: '1.1.0', since: '1.22.0' },
-  { id: 'settings', name: 'Settings', version: '1.1.2', since: '1.19.4' },
-  { id: 'ai-configuration', name: 'AI configuration', version: '1.0.1', since: '1.22.0' },
-  { id: 'launch-screen', name: 'Launch screen', version: '1.0.1', since: '1.22.0' },
+  { id: 'stability-patterns', name: 'Stability patterns', version: '1.0.2', since: '1.23.0' },
+  { id: 'in-app-updates', name: 'In-app updates', version: '1.1.1', since: '1.23.0' },
+  { id: 'settings', name: 'Settings', version: '2.0.1', since: '1.23.0' },
+  { id: 'ai-configuration', name: 'AI configuration', version: '1.0.2', since: '1.23.0' },
+  { id: 'launch-screen', name: 'Launch screen', version: '1.0.2', since: '1.23.0' },
   { id: 'widgets', name: 'Widgets', version: '1.1.1', since: '1.22.0' },
-  { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.12.0' },
-  { id: 'audio-playback', name: 'Sound in silent mode', version: '1.0.1', since: '1.22.0' },
-  { id: 'read-aloud', name: 'Read aloud', version: '1.2.3', since: '1.19.3' },
-  { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.14.0' },
+  { id: 'ai-invitation', name: 'AI invitation', version: '1.2.2', since: '1.23.0' },
+  { id: 'audio-playback', name: 'Sound in silent mode', version: '1.0.2', since: '1.23.0' },
+  { id: 'read-aloud', name: 'Read aloud', version: '1.2.4', since: '1.23.0' },
+  { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.1', since: '1.23.0' },
 ];
+// What each blueprint is, shown when a Built with row is tapped (settings blueprint, Step 9).
+// Written by `node tools/about.js` in app-blueprints from the versions in BLUEPRINTS; never edit by hand.
+const BLUEPRINT_ABOUT = {
+  'stability-patterns': { what: "The rules that keep the app opening on any iPhone.", does: "Uses iCloud only when this iPhone has it, keeps data on the phone otherwise, and checks the Keychain before reading from it.", drives: "Where the app keeps its data, the widget, the installer and in-app updates.", why: "A new phone, one without iCloud or one with nothing saved yet still opens the app, instead of stopping with an error." },
+  'in-app-updates': { what: "The way the app offers and installs its own new versions.", does: "When the app opens it checks for a newer version, shows its three best features, and installs it with Update now; Later waits two days.", drives: "The update sheet, Settings › Updates and the installer.", why: "Fixes and features reach you without reinstalling by hand, and the app only replaces itself with a checked, newer copy." },
+  'settings': { what: "The shared Settings sheet every app has.", does: "Keeps the app's look, behaviour and limits in one place; changes apply at once and survive updates.", drives: "Appearance (colours, layout, text size, font), the app's own choices, Updates, every adjustable value, and this Built with list.", why: "Nobody edits code to change a setting, and every app is set up the same familiar way." },
+  'ai-configuration': { what: "How the app connects to Claude or OpenAI.", does: "Keeps your key in the iPhone Keychain, lets you pick the provider and model, tests the connection and counts the tokens each feature uses.", drives: "Settings › AI settings, every AI feature, and the ✦ AI label on everything AI wrote.", why: "Your key goes only to its own provider, you can see what AI uses, and the app still works without a key." },
+  'launch-screen': { what: "The branded screen the app opens on.", does: "Shows the app's logo, name and tagline for about two and a half seconds; a tap skips it, and Reduce Motion keeps it still.", drives: "The first moment after the app opens, with the same logo as the icon and the widget.", why: "The app starts the same recognisable way every time while its page gets ready behind the screen, and the screen can never get stuck." },
+  'widgets': { what: "The shared design for the app's Home Screen and Lock Screen widgets.", does: "Draws the app's logo and name, one headline figure or title, a few rows and an updated line, from the app's own data.", drives: "Every widget size, the Lock Screen versions, and the widget's settings.", why: "Widgets name their app, look like one family, say when their data is old, and never show a script error." },
+  'ai-invitation': { what: "A short card that shows what AI adds to this app.", does: "While no AI key is set, it names three things AI can do here and takes you straight to adding a key; it comes back every few days at most, and Don't remind me again ends it.", drives: "The invitation at launch, and the hand-over to Settings › AI settings.", why: "Features that need a key are hidden without one, so they are easy to miss; this shows them without nagging or covering anything else." },
+  'audio-playback': { what: "The rule that lets sound you asked for play with the Ring/Silent switch on.", does: "While the app reads, speaks or plays a sound you started, it tells iOS it is a media player, and gives sound back to other apps when it stops.", drives: "Reading aloud, spoken words, timer beeps and any other sound the app makes.", why: "Without it, iOS silently mutes the app while it looks as if it is playing." },
+  'read-aloud': { what: "The shared way the app reads text aloud, with an optional reader for articles.", does: "Reads posts, summaries or stories with an iPhone or AI voice, highlights the sentence being read, and shows how much is left.", drives: "The Listen buttons, the player at the bottom, the text view, the reader and Settings › Listening.", why: "You can listen hands-free and always know what is being read, from where, and for how long." },
+  'usage-analytics': { what: "Optional, anonymous counts of which features get used.", does: "Only after you say yes, it sends counts and fixed choices, never names, text, links or keys; turning it off stops sending and forgets the install ID.", drives: "The one-time question on the main page and Settings › Privacy.", why: "It shows what to improve next without collecting anything personal." },
+};
 
 // ---------- config ----------
 const APP = "BlogPulse";
@@ -1270,7 +1283,7 @@ function clientState() {
     secrets: Object.fromEntries(Object.keys(SECRETS).map(id => [id, { name: SECRETS[id].name, last4: (secretFor(id) || "").slice(-4) || null }])),
     usageAvailable: usageAvailable(), usageStatus: usageStatus(), usageAsk: usageAvailable() && !settings.usageAsked && !settings.shareUsage,
     ttsModels: settings.ttsModels || null,
-    blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO,
+    blueprints: BLUEPRINTS, blueprintAbout: BLUEPRINT_ABOUT, appName: APP,
     catalog: CATALOG.map(c => ({ title: c[0], feed: c[1], tags: c[2] })),
   };
 }
@@ -1432,9 +1445,6 @@ async function handle(m) {
       try { txt = FileManager.local().readString(LOG_PATH).split("\n").slice(-40).join("\n"); } catch (e) {}
       return call("__done", m.req, true, txt);
     }
-    case "openurl":   // Settings › Built with: only the blueprints repository opens from here
-      if (m.v === BLUEPRINTS_REPO || String(m.v).startsWith(BLUEPRINTS_REPO + "/")) await Safari.openInApp(m.v, false);
-      return;
     case "update-check": {
       const u = await checkForUpdate(true);
       await call("__done", m.req, true, u ? `Version ${u.latest} is available` : `You're on the latest version (${VERSION})`);
@@ -1502,12 +1512,35 @@ function clientApp() {
   const cfgItem = k => { for (const sec of S.cfgSchema) for (const d of sec.items) if (d.k === k) return d; return null; };
   const cfgChanged = k => { const d = cfgItem(k); return d && JSON.stringify(S.cfg[k]) !== JSON.stringify(d.def); };
   const fmtCfg = (d, v) => d.step && d.step < 1 ? Number(v).toFixed(String(d.step).split(".")[1].length) : String(v);
-  // Settings › Built with: the shared blueprints this app follows, each linked at the version it follows.
-  const bpLink = b => `${S.blueprintsRepo}/blob/${b.id}-v${b.version}/blueprints/${b.id}.md`;
+  // Settings › Built with: the shared blueprints this app follows. A tap shows what one is, from text bundled in the app.
+  let bpOpen = null;   // a blueprint id, "*" for About blueprints, or null
+  const BP_FIELDS = [["what", "What it is"], ["does", "What it does"], ["drives", "What it drives"], ["why", "Why it matters"]];
+  const BP_ALL = {
+    what: "Shared designs this app and its sister apps are built from, one for each part they have in common.",
+    does: "Each one fixes how its part works: what you see, the words used, where data is kept and the safety rules.",
+    drives: "Every row above; each says which version this app follows, and since which version of the app.",
+    why: "A fix or improvement made once reaches every app the same way, so the apps stay alike and dependable.",
+  };
   function builtWithHTML() {
-    return `<h3 class="sec">Built with</h3><p class="hint">BlogPulse is built from shared blueprints that the other apps use too. Tap one to read how that part works.</p>
-      ${S.blueprints.map(b => `<button class="srow bp" data-act="openurl" data-v="${esc(bpLink(b))}"><div class="grow"><b>${esc(b.name)}</b><small class="muted">Blueprint ${esc(b.version)} · since BlogPulse ${esc(b.since)}</small></div><span class="go" aria-hidden="true">›</span></button>`).join("")}
-      <button class="srow bp" data-act="openurl" data-v="${esc(S.blueprintsRepo)}"><div class="grow"><b>All blueprints</b><small class="muted">${esc(S.blueprintsRepo.replace("https://", ""))}</small></div><span class="go" aria-hidden="true">›</span></button>`;
+    return `<h3 class="sec">Built with</h3><p class="hint">${esc(S.appName)} is built from shared blueprints that its sister apps use too. Tap one to see what it does.</p>
+      ${S.blueprints.map(b => `<button class="srow bp" data-act="bpabout" data-v="${esc(b.id)}"><div class="grow"><b>${esc(b.name)}</b><small class="muted">Blueprint ${esc(b.version)} · since ${esc(S.appName)} ${esc(b.since)}</small></div><span class="go" aria-hidden="true">›</span></button>`).join("")}
+      <button class="srow bp" data-act="bpabout" data-v="*"><div class="grow"><b>About blueprints</b><small class="muted">What they are and why every app has them</small></div><span class="go" aria-hidden="true">›</span></button>`;
+  }
+  function renderBp() {
+    const el = $("#bpabout");
+    const b = S.blueprints.find(x => x.id === bpOpen), a = bpOpen === "*" ? BP_ALL : b && (S.blueprintAbout || {})[b.id];
+    el.classList.toggle("open", !!(a || b)); el.setAttribute("aria-hidden", a || b ? "false" : "true");
+    if (!a && !b) return;   // closing: keep the old content while the card slides away
+    el.innerHTML = `<div class="bp-dim" data-act="bpclose"></div>
+      <div class="bp-card" role="dialog" aria-modal="true" aria-labelledby="bp-h">
+        <div class="bp-top"><div class="grow"><small class="bp-kick">${b ? "Blueprint" : "Built with"}</small>
+          <h2 id="bp-h">${esc(b ? b.name : "About blueprints")}</h2>
+          ${b ? `<small class="muted">Blueprint ${esc(b.version)} · since ${esc(S.appName)} ${esc(b.since)}</small>` : ""}</div>
+          <button class="link" data-act="bpclose">Done</button></div>
+        ${a ? BP_FIELDS.map(([k, l]) => `<h3 class="bp-l">${l}</h3><p class="bp-p">${esc(a[k])}</p>`).join("")
+            : `<p class="bp-p muted">This version of ${esc(S.appName)} carries no description of this blueprint.</p>`}
+      </div>`;
+    el.querySelector(".bp-card").scrollTop = 0;
   }
   const vseg = (k, opts) => `<div class="seg wide">${opts.map(([v, l]) => `<button class="${String(S.settings[k]) === String(v) ? "on" : ""}" data-act="voiceset" data-k="${k}" data-v="${v}">${l}</button>`).join("")}</div>`;
   function listenHTML() {
@@ -2830,7 +2863,8 @@ function clientApp() {
       case "upd-now": updNow(t); break;
       case "upd-later": updLater(); break;
       case "upd-close": { const uo = document.getElementById("upd"); if (uo) uo.remove(); break; }
-      case "openurl": send("openurl", { v }); break;
+      case "bpabout": bpOpen = v; renderBp(); break;
+      case "bpclose": bpOpen = null; renderBp(); break;
       case "startlog": {
         const pre = $("#startlog");
         if (!pre.hidden) { pre.hidden = true; t.textContent = "Show"; break; }
@@ -2927,7 +2961,7 @@ function clientApp() {
       case "toggle": S.settings[v] = !S.settings[v]; send("set", { k: v, v: S.settings[v] }); renderCfg(); renderAI(); if (v === "collapseRead") render(); break;
       case "aiopen": aiOpen = true; renderAI(); send("state", {}); break;   // fresh token counts
       case "cfgopen": cfgOpen = true; renderCfg(); break;
-      case "cfgclose": cfgOpen = false; cfgArmed = false; renderCfg(); renderSheet(); break;
+      case "cfgclose": cfgOpen = false; cfgArmed = false; bpOpen = null; renderBp(); renderCfg(); renderSheet(); break;
       case "cfgreset": { const d = cfgItem(t.dataset.k); S.cfg[d.k] = d.def; send("cfg", { k: d.k, v: null }); renderCfg(); break; }
       case "cfgstep": {
         const d = cfgItem(t.dataset.k), step = d.step || 1;
@@ -3497,6 +3531,18 @@ html[data-font=serif] .ra-p{font-family:var(--serif)}
 }
 .ver{text-align:center;color:var(--muted);font-size:12px;margin:0;padding:0 0 calc(env(safe-area-inset-bottom) + 24px)}
 #aisheet{z-index:14}
+#bpabout{position:fixed;inset:0;z-index:15;pointer-events:none}
+#bpabout.open{pointer-events:auto}
+.bp-dim{position:absolute;inset:0;background:rgba(0,0,0,.45);opacity:0;transition:opacity .2s}
+#bpabout.open .bp-dim{opacity:1}
+.bp-card{position:absolute;left:0;right:0;bottom:0;max-height:86vh;overflow-y:auto;-webkit-overflow-scrolling:touch;background:var(--paper);color:var(--ink);border-top:1px solid var(--rule);border-radius:20px 20px 0 0;padding:18px 20px calc(env(safe-area-inset-bottom) + 28px);transform:translateY(102%);transition:transform .28s ease}
+#bpabout.open .bp-card{transform:none}
+.bp-top{display:flex;align-items:flex-start;gap:12px;margin-bottom:6px}
+.bp-kick{display:block;font:700 calc(11.5px * var(--ts))/1.2 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--signal)}
+.bp-card h2{font:700 calc(24px * var(--ts))/1.15 var(--display);margin:4px 0 4px}
+.bp-l{font:700 calc(12.5px * var(--ts))/1.2 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:20px 0 6px}
+.bp-p{margin:0;font-size:calc(16px * var(--ts));line-height:1.45}
+@media (prefers-reduced-motion: reduce){.bp-card,.bp-dim{transition:none}}
 .sec-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .sinfo{display:block;width:100%;text-align:left}
 .sinfo b,.sinfo small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -3639,6 +3685,7 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
 <div id="reader" class="sheet" aria-label="Reader"></div>
 <div id="readsheet" class="sheet" aria-label="Text being read"></div>
 <div id="cfgsheet" class="sheet" aria-label="Settings"></div>
+<div id="bpabout" aria-hidden="true"></div>
 <div id="player" hidden role="region" aria-label="Reading aloud">
   <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
   <div class="pl-info"><span id="plMode" class="pl-mode" hidden></span><b id="plTitle"></b><small id="plSub"></small></div>
