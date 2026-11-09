@@ -1,0 +1,32 @@
+{
+  "name": "BlogPulse",
+  "accent": "#A78BFA",
+  "headline": [
+    "Scan.",
+    "Read.",
+    "Rate."
+  ],
+  "sentence": "The tech blogs you follow go in. New posts, sorted by topic and summarised in seconds, come out.",
+  "shots": [
+    {
+      "card": "03-tldr.png",
+      "y": 24
+    },
+    {
+      "card": "01-unread.png",
+      "y": 64
+    }
+  ],
+  "motif": {
+    "x": 0,
+    "y": 540,
+    "w": 592,
+    "rotate": 0,
+    "front": true,
+    "svg": "<svg viewBox='0 0 592 90' xmlns='http://www.w3.org/2000/svg'><path d='M6 62 H300 L322 62 L344 14 L370 84 L392 38 L410 62 H540' fill='none' stroke='#F6F7F9' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='562' cy='62' r='18' fill='{accent}'/></svg>"
+  },
+  "benefit": "Every tech blog you follow, caught up in minutes",
+  "steps": "Pick your blogs. Open BlogPulse. Read what's new.",
+  "facts": "Free · iPhone and iPad · Runs in the free Scriptable app · AI is optional, with your own Claude or OpenAI key",
+  "bannerAlt": "BlogPulse: Scan. Read. Rate. The tech blogs you follow go in, new posts sorted by topic and summarised come out. Two iPhone screens show unread posts and a TL;DR, crossed by a white heartbeat line ending in a violet dot."
+}

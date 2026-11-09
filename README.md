@@ -1,12 +1,15 @@
+<!-- header:start: repo-site/tools/header.js writes this block from docs/site/header.json -->
 <div align="center">
 
-<img src="docs/logo.svg" width="96" alt="BlogPulse logo: feed lines with a heartbeat pulse ending in a violet dot, and a teal new-article line">
+<a href="#install"><img src="docs/banner.png" width="100%" alt="BlogPulse: Scan. Read. Rate. The tech blogs you follow go in, new posts sorted by topic and summarised come out. Two iPhone screens show unread posts and a TL;DR, crossed by a white heartbeat line ending in a violet dot."></a>
 
-# BlogPulse
+<h2>Every tech blog you follow, caught up in minutes</h2>
 
-**Scan. Read. Rate.**
+Pick your blogs. Open BlogPulse. Read what's new.
 
-Every tech blog you care about, checked the moment you open it, sorted by topic, summarised in seconds and ready to share.<br>An iPhone and iPad app for [Scriptable](https://scriptable.app). One file, no server, no sign-up.
+<a href="#install"><img src="docs/button-install.png" height="48" alt="Install BlogPulse free"></a>&nbsp;&nbsp;<a href="CHANGELOG.md"><img src="docs/button-whats-new.png" height="48" alt="See what's new in BlogPulse"></a>
+
+<sub>Free · iPhone and iPad · Runs in the free Scriptable app · AI is optional, with your own Claude or OpenAI key</sub>
 
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgadominas%2FBlogPulse%2Fmain%2Freleases.json&query=%24.releases%5B0%5D.version&label=version&color=A78BFA&labelColor=0E1116&style=flat-square)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-171B22?style=flat-square&labelColor=0E1116)](https://apps.apple.com/app/scriptable/id1405459188)
@@ -16,6 +19,7 @@ Every tech blog you care about, checked the moment you open it, sorted by topic,
 [![License](https://img.shields.io/badge/license-MIT-171B22?style=flat-square&labelColor=0E1116)](LICENSE)
 
 </div>
+<!-- header:end -->
 
 <p align="center">
   <img src="docs/screenshots/01-unread.png" width="31%" alt="Unread posts grouped by day, with topic pills, AI summaries, New and Pick tags, stars, Listen and TL;DR buttons">
